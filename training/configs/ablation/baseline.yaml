@@ -1,0 +1,4 @@
+# Ablation baseline: motion_buddy_40, no augmentation beyond the +-2 px shift, 50 epochs.
+base: ../motion_buddy_40.yaml
+name: ablation_baseline
+train: {epochs: 50}

@@ -1,0 +1,30 @@
+# Tiny end-to-end run (a few minutes) to check the pipeline works: 1 epoch on 64 clips per split.
+name: smoke
+seed: 42
+
+data:
+  root: data/motion_buddy_dataset
+  cache_dir: cache
+  classes: [sit, lay-down, hello, dance, no-action]
+  train: ["01", "02"]
+  val: ["03"]
+  test: ["04"]
+  downsampling: 8
+  encoding: mean
+  limit_per_split: 64
+
+model:
+  neuron: {initial_tau: 14.285714, learnable_leak: false, v_threshold: 1.0, reset_mode: HARD}
+  layers:
+    - {out: 16, kernel: 5, stride: 2, padding: 1}
+    - {out: 16, kernel: 3, stride: 1, padding: 1}
+    - {out: 8, kernel: 6, stride: 2, padding: 2}
+    - {out: 256, kernel: 9, stride: 1, padding: 0}
+    - {out: classes, kernel: 1, stride: 1, padding: 0}
+
+train:
+  batch_size: 16
+  epochs: 1
+
+quant:
+  qat_epochs: 1

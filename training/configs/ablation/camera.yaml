@@ -1,0 +1,9 @@
+# Ablation: camera / sensor augmentation only (dropout, rate, noise, hot pixels), 50 epochs.
+base: ../motion_buddy_40.yaml
+name: ablation_camera
+train: {epochs: 50}
+augment:
+  dropout: {p: 0.5, max: 0.3}
+  rate: {p: 0.5, range: [0.7, 1.3]}
+  noise: {p: 0.5, max_rate: 0.3}
+  hot_pixels: {p: 0.3, max_count: 2, rate: [2, 20]}

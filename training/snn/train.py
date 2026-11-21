@@ -1,0 +1,263 @@
+"""Training: float phase → choose formats → QAT phase → fixed-point check → export.
+
+Run through `python -m training.snn train --config ... --run-dir ...` (see __main__.py), or
+`python -m training.snn qat --run-dir ...` to redo everything after the float phase from float_best.pt.
+"""
+from __future__ import annotations
+
+import copy
+import csv
+import json
+import random
+import time
+from pathlib import Path
+
+import numpy as np
+import torch
+from torch import nn
+
+from riverops.nn import BatchNorm2d, Conv2d, prepare_ptq, prepare_qat
+
+from .augment import augment as augment_counts
+from .config import Config
+from .model import build_model
+from .quant import Formats, choose_formats
+
+
+def pick_device(name: str) -> torch.device:
+    if name != "auto":
+        return torch.device(name)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+
+class SplitData:
+    """One split kept on the device as float16 event counts; encoded per batch."""
+
+    def __init__(self, x_path: Path, y_path: Path, cfg: Config, device: torch.device):
+        counts = np.load(x_path, mmap_mode="r")
+        self.x = torch.empty(counts.shape, dtype=torch.float16, device=device)
+        for i in range(0, len(counts), 256):     # convert in chunks to keep host memory low
+            chunk = np.minimum(counts[i:i + 256], 65504).astype(np.float16)
+            self.x[i:i + 256] = torch.from_numpy(chunk).to(device)
+        self.y = torch.from_numpy(np.load(y_path)).to(device)
+        self.cfg = cfg
+
+    def __len__(self) -> int:
+        return len(self.y)
+
+    def batch(self, index: torch.Tensor, augment: bool) -> tuple[torch.Tensor, torch.Tensor, int]:
+        """Encoded frames [B, W+T, 2, H, W], labels, and W = warm-start prefix frames (0 unless augmenting)."""
+        counts, warmup = self.x[index].float(), 0
+        if augment:
+            counts, warmup = augment_counts(counts, self.cfg)
+        return encode(counts, self.cfg), self.y[index], warmup
+
+
+def encode(counts: torch.Tensor, cfg: Config) -> torch.Tensor:
+    if cfg.data.encoding == "mean":
+        return counts / cfg.data.downsampling ** 2
+    if cfg.data.encoding == "binary":
+        return (counts >= 0.5).float()      # == counts > 0 on real (integer) counts; augmentation can make fractions
+    return counts
+
+
+def spike_targets(labels: torch.Tensor, time_steps: int, n_classes: int, cfg: Config) -> torch.Tensor:
+    targets = torch.full((len(labels), n_classes), cfg.train.target_low * time_steps, device=labels.device)
+    targets[torch.arange(len(labels), device=labels.device), labels] = cfg.train.target_high * time_steps
+    return targets
+
+
+def spike_count_loss(scores: torch.Tensor, targets: torch.Tensor, time_steps: int) -> torch.Tensor:
+    return (scores - targets).square().mean(dim=1).mean() / time_steps
+
+
+def clamp_parameters(model: nn.Module, limit: float) -> None:
+    with torch.no_grad():
+        for module in model.modules():
+            if isinstance(module, (Conv2d, BatchNorm2d)):
+                for p in (module.weight, getattr(module, "bias", None)):
+                    if p is not None:
+                        p.clamp_(-limit, limit)
+
+
+def run_epoch(model, data: SplitData, cfg: Config, optimizer=None, clamp: float | None = None,
+              augment: bool = True) -> dict:
+    training = optimizer is not None
+    model.train(training)
+    T, n = cfg.data.time_steps, cfg.n_classes
+    order = torch.randperm(len(data), device=data.y.device) if training else torch.arange(len(data), device=data.y.device)
+    total_loss, correct, spikes = 0.0, 0, 0.0
+    confusion = torch.zeros(n, n, dtype=torch.long)
+    with torch.set_grad_enabled(training):
+        for index in order.split(cfg.train.batch_size):
+            x, y, warmup = data.batch(index, augment=training and augment)
+            scores = model(x, warmup=warmup)
+            loss = spike_count_loss(scores, spike_targets(y, T, n, cfg), T)
+            if not torch.isfinite(loss):
+                raise FloatingPointError(f"loss is {loss.item()} ({'training' if training else 'evaluation'}); "
+                                         "see 'NaN during QAT' in training/README.md")
+            if training:
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                nn.utils.clip_grad_norm_(model.parameters(), cfg.train.grad_clip)
+                optimizer.step()
+                if clamp:
+                    clamp_parameters(model, clamp)
+            predicted = scores.argmax(dim=1)
+            total_loss += loss.item() * len(y)
+            spikes += scores.detach().sum().item()
+            correct += (predicted == y).sum().item()
+            for t, p in zip(y.tolist(), predicted.tolist()):
+                confusion[t, p] += 1
+    # spikes: mean output spikes per clip and class; 0 means the network is silent
+    return {"loss": total_loss / len(data), "acc": correct / len(data), "confusion": confusion.tolist(),
+            "spikes": spikes / len(data) / n}
+
+
+def fit(model, train: SplitData, val: SplitData, cfg: Config, *, epochs: int, lr: float, phase: str,
+        clamp: float | None, history: list, run_dir: Path, augment: bool = True):
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=cfg.train.weight_decay)
+    best_acc, best_state = -1.0, copy.deepcopy(model.state_dict())
+    for epoch in range(1, epochs + 1):
+        start = time.time()
+        tr = run_epoch(model, train, cfg, optimizer, clamp, augment=augment)
+        va = run_epoch(model, val, cfg)
+        improved = va["acc"] > best_acc
+        if improved:
+            best_acc, best_state = va["acc"], copy.deepcopy(model.state_dict())
+        history.append({"phase": phase, "epoch": epoch, "train_loss": tr["loss"], "train_acc": tr["acc"],
+                        "val_loss": va["loss"], "val_acc": va["acc"], "val_spikes": va["spikes"],
+                        "seconds": time.time() - start})
+        print(f"[{phase}] epoch {epoch:3d}/{epochs}  train loss {tr['loss']:.4f} acc {tr['acc']:.1%}  "
+              f"val loss {va['loss']:.4f} acc {va['acc']:.1%} spikes {va['spikes']:.1f}  ({time.time() - start:.0f}s)"
+              f"{'  *best' if improved else ''}", flush=True)
+        write_history(history, run_dir)
+    model.load_state_dict(best_state)
+    return model, best_acc
+
+
+def write_history(history: list, run_dir: Path) -> None:
+    with open(run_dir / "history.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(history[0]))
+        writer.writeheader()
+        writer.writerows(history)
+
+
+def save_checkpoint(path: Path, model, cfg: Config, formats: Formats | None, phase: str) -> None:
+    torch.save({"state_dict": model.state_dict(), "config": cfg.to_dict(), "phase": phase,
+                "formats": formats.to_dict() if formats else None}, path)
+
+
+def load_qat_model(path: Path, cfg: Config):
+    checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+    formats = Formats(**checkpoint["formats"])
+    model = prepare_qat(build_model(cfg), formats.riverops(), fused_bn=True)
+    model.load_state_dict(checkpoint["state_dict"])
+    return model.eval(), formats
+
+
+def zero_dead_batchnorm(model: nn.Module, limit: float = 1e-6) -> int:
+    """Set BatchNorm scales that weight decay has shrunk to ~0 (often denormals like 5e-41) to exactly 0.
+
+    Such a channel outputs a constant (its bias) anyway. But fusion-aware QAT divides by the folded scale
+    gamma / sqrt(var + eps), and its gradient by the scale squared, which overflows → inf → NaN in the
+    first backward pass. riverops treats an exact 0 scale as a special case, so 0 is safe.
+    """
+    zeroed = 0
+    with torch.no_grad():
+        for module in model.modules():
+            if isinstance(module, nn.BatchNorm2d) and module.weight is not None:
+                dead = module.weight.abs() < limit
+                module.weight[dead] = 0.0
+                zeroed += int(dead.sum())
+    return zeroed
+
+
+def train(cfg: Config, cache: dict, run_dir: Path) -> dict:
+    """Float training, then quantize() (formats → QAT → fixed-point check)."""
+    seed_everything(cfg.seed)
+    device = pick_device(cfg.train.device)
+    print(f"device: {device}" + (f" ({torch.cuda.get_device_name(device)})" if device.type == "cuda" else ""),
+          flush=True)
+    if cfg.augment.active() or cfg.data.max_shift:
+        print(f"augmentation: {', '.join(cfg.augment.active() + [f'shift +-{cfg.data.max_shift}px'])}"
+              f"{'' if cfg.augment.qat else ' (float phase only)'}", flush=True)
+    splits = {name: SplitData(*paths, cfg, device) for name, paths in cache.items()}
+    history: list[dict] = []
+
+    # 1. Float training (notebook recipe).
+    model = build_model(cfg).to(device)
+    model, _ = fit(model, splits["train"], splits["val"], cfg, epochs=cfg.train.epochs, lr=cfg.train.lr,
+                   phase="float", clamp=cfg.train.weight_clamp, history=history, run_dir=run_dir)
+    save_checkpoint(run_dir / "float_best.pt", model, cfg, None, "float")
+    return quantize(model, cfg, splits, run_dir, history)
+
+
+def qat_from_float(cfg: Config, cache: dict, run_dir: Path) -> dict:
+    """Redo formats → QAT → fixed-point check from run_dir/float_best.pt, keeping the float history."""
+    seed_everything(cfg.seed)
+    device = pick_device(cfg.train.device)
+    splits = {name: SplitData(*paths, cfg, device) for name, paths in cache.items()}
+    model = build_model(cfg)
+    model.load_state_dict(torch.load(run_dir / "float_best.pt", map_location="cpu", weights_only=True)["state_dict"])
+    history = []
+    if (run_dir / "history.csv").exists():
+        with open(run_dir / "history.csv", newline="") as f:
+            history = [row for row in csv.DictReader(f) if row["phase"] == "float"]
+    return quantize(model.to(device), cfg, splits, run_dir, history)
+
+
+def quantize(model, cfg: Config, splits: dict, run_dir: Path, history: list) -> dict:
+    device = next(model.parameters()).device
+    float_val, float_test = run_epoch(model, splits["val"], cfg), run_epoch(model, splits["test"], cfg)
+
+    # 2. Choose the number formats from the BN-folded parameters.
+    zeroed = zero_dead_batchnorm(model)
+    if zeroed:
+        print(f"zeroed {zeroed} dead BatchNorm channel(s) (|gamma| < 1e-6) before QAT", flush=True)
+    formats, format_info = choose_formats(model.cpu(), cfg)
+    model.to(device)
+    print(f"formats: {formats.describe()}  ({format_info})", flush=True)
+
+    # 3. Quantization-aware fine-tuning with BN folded inside the fake quantization,
+    #    so training sees exactly the clipped, rounded weights the FPGA will get.
+    qat = prepare_qat(model, formats.riverops(), fused_bn=True).to(device)
+    if cfg.quant.qat_epochs:
+        qat, _ = fit(qat, splits["train"], splits["val"], cfg, epochs=cfg.quant.qat_epochs, lr=cfg.quant.qat_lr,
+                     phase="qat", clamp=None, history=history, run_dir=run_dir, augment=cfg.augment.qat)
+    save_checkpoint(run_dir / "qat_best.pt", qat, cfg, formats, "qat")
+    qat_val, qat_test = run_epoch(qat, splits["val"], cfg), run_epoch(qat, splits["test"], cfg)
+
+    # 4. Fixed-point emulation of the deployed model (folded BN, integer-grid arithmetic).
+    fixed = prepare_ptq(qat, formats.riverops(qat=False), fuse=True).to(device)
+    fixed_val, fixed_test = run_epoch(fixed, splits["val"], cfg), run_epoch(fixed, splits["test"], cfg)
+
+    metrics = {
+        "classes": cfg.data.classes,
+        "augment": cfg.augment.active(),
+        "formats": formats.to_dict() | {"description": formats.describe()},
+        "format_choice": format_info,
+        "dead_batchnorm_channels": zeroed,
+        "float": {"val_acc": float_val["acc"], "test_acc": float_test["acc"]},
+        "qat": {"val_acc": qat_val["acc"], "test_acc": qat_test["acc"]},
+        "fixed_point": {"val_acc": fixed_val["acc"], "test_acc": fixed_test["acc"],
+                        "test_mean_output_spikes": fixed_test["spikes"],
+                        "test_confusion": fixed_test["confusion"]},
+        "clips": {name: len(s) for name, s in splits.items()},
+    }
+    (run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2) + "\n")
+    print("accuracy (val / test):\n"
+          f"  float        {float_val['acc']:.1%} / {float_test['acc']:.1%}\n"
+          f"  QAT          {qat_val['acc']:.1%} / {qat_test['acc']:.1%}\n"
+          f"  fixed point  {fixed_val['acc']:.1%} / {fixed_test['acc']:.1%}   ← closest to the FPGA", flush=True)
+    return metrics

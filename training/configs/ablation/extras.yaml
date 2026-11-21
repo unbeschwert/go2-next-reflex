@@ -1,0 +1,8 @@
+# Ablation: the three optional ones (flip, cutout, polarity swap) on top of the full set, 50 epochs.
+base: ../motion_buddy_40_aug.yaml
+name: ablation_extras
+train: {epochs: 50}
+augment:
+  flip: {p: 0.5}
+  cutout: {p: 0.3, size: [0.2, 0.4]}
+  polarity: {p: 0.2}

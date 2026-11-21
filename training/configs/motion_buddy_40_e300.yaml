@@ -1,0 +1,57 @@
+# Same as motion_buddy_40.yaml, but 300 float epochs (QAT stays 10 epochs).
+name: motion_buddy_40_e300
+seed: 42
+
+data:
+  root: data/motion_buddy_dataset
+  cache_dir: cache
+  classes: [sit, lay-down, hello, dance, no-action]   # output neuron order
+  train: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10"]
+  val: ["11", "12"]
+  test: ["13", "14"]
+  clip_us: 1000000
+  time_window_us: 10000      # 100 steps of 10 ms → despot frequency 100 Hz
+  downsampling: 8            # 320 / 8 = 40x40 → despot downsampling 8
+  encoding: mean             # mean | sum | binary: must match despot's frames
+  max_shift: 2
+
+model:
+  neuron:
+    initial_tau: 14.285714   # 1 / (1 - 0.93)
+    learnable_leak: false
+    v_threshold: 1.0
+    reset_mode: HARD
+  layers:                    # 40 → 19 → 19 → 9 → 1 → 1
+    - {out: 16, kernel: 5, stride: 2, padding: 1}
+    - {out: 16, kernel: 3, stride: 1, padding: 1}
+    - {out: 8, kernel: 6, stride: 2, padding: 2}
+    - {out: 256, kernel: 9, stride: 1, padding: 0}
+    - {out: classes, kernel: 1, stride: 1, padding: 0}
+
+train:
+  batch_size: 32
+  epochs: 300
+  lr: 0.003
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  weight_clamp: 1.0
+  target_high: 0.8
+  target_low: 0.2
+  device: auto
+
+quant:
+  weight_bits: 8             # 8 bit = 4096 weights per BRAM36 (9-bit words); 16 bit would double the BRAM
+  weight_int_bits: auto      # fewest int bits that hold the BN-folded weights/biases
+  weight_percentile: 99.9
+  potential_bits: 16         # 16 bit = 2048 potentials per BRAM36 (18-bit words)
+  potential_int_bits: 4      # Q4.12 → spleat-server scaling 4096
+  qat_epochs: 10
+  qat_lr: 0.0001
+
+fpga:
+  board: kv260
+  reserve: 0.25              # keep 25 % of BRAM/URAM for the camera IP, DMA and the rest of the design
+  event_fifo_depth: 1024
+  lutram_max_bits: 1024
+  strategy: less-resources
+  fail_on_overflow: true

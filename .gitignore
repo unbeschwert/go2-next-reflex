@@ -19,10 +19,15 @@ log/
 .idea/
 .DS_Store
 
-# Go2 3D model for RViz (downloaded by laptop/rviz/fetch_go2_model.sh)
-laptop/rviz/meshes/
-laptop/rviz/go2.urdf
-laptop/rviz/go2_description.urdf
+# Training outputs and caches
+runs/
+cache/
+
+# Server address (see remote/remote.env.example)
+remote/remote.env
+
+# Firmware builds from riversdk.dev (download per job, not source)
+firmware-*.tar.gz
 
 # Organiser-supplied FPGA firmware and trained weights (not ours to publish)
 *.bit.bin
@@ -30,4 +35,8 @@ laptop/rviz/go2_description.urdf
 weights.txt
 weights.json
 *parameters*.txt
-firmware-kv260*.tar.gz
+
+# Go2 3D model for RViz (downloaded by ros2/rviz/fetch_go2_model.sh)
+ros2/rviz/meshes/
+ros2/rviz/go2.urdf
+ros2/rviz/go2_description.urdf

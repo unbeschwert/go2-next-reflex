@@ -1,5 +1,7 @@
 # Training an SNN with `riverops`
 
+> Our pipeline that automates all of this on the GPU server: [training/README.md](../training/README.md).
+
 Condensed from the RIVER SDK notebook "Train a model" (`train_motion_buddy`) and the `riverops` 0.2.0 docs.
 
 ## Install
