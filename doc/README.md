@@ -17,6 +17,7 @@ Most of this is condensed from the organisers' RIVER SDK docs at https://riversd
 | [deploy-model.md](deploy-model.md) | Putting a trained SNN on the Kria: bitstream, server config, camera config, weights file |
 | [fpga-debugging.md](fpga-debugging.md) | **Learning record**: why the FPGA and the simulation disagreed (potentials never reset), each hypothesis and its test |
 | [go2-kria-overview.md](go2-kria-overview.md) | The ROS 2 workspace: SNN scores → Go2 commands, building it for the Kria |
+| [gesture-pipeline.md](gesture-pipeline.md) | **Our working setup:** best model on the FPGA, Python bridge to the real Go2, browser/RViz views, simulator, gotchas |
 
 ## End-to-end workflow
 

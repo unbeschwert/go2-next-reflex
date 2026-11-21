@@ -1,0 +1,58 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Floor
+      Enabled: true
+      Cell Size: 0.25
+      Plane Cell Count: 16
+      Color: 160; 160; 164
+      Reference Frame: world
+      Value: true
+    - Class: rviz_default_plugins/RobotModel
+      Name: Go2
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+      Visual Enabled: true
+      Collision Enabled: false
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Name: Action label
+      Enabled: true
+      Topic:
+        Value: /go2_viz/label
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Name: FPGA scores
+      Enabled: true
+      Topic:
+        Value: /go2_viz/scores
+      Value: true
+  Global Options:
+    Background Color: 38; 40; 46
+    Fixed Frame: world
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 2.1
+      Focal Point:
+        X: -0.25
+        Y: 0
+        Z: 0.32
+      Pitch: 0.32
+      Yaw: 0.45
+      Name: Current View
+      Target Frame: <Fixed Frame>
+Window Geometry:
+  Height: 800
+  Width: 1100

@@ -1,0 +1,20 @@
+{
+  "input": {"channels": 2, "height": 80, "width": 80},
+  "nodes": [
+    {"node_index": "conv1", "node_type": "ConvLIF2d", "upscaling": 1, "channels": 16,  "kernel_size": 3, "stride": 2, "padding": [1, 1, 1, 1]},
+    {"node_index": "conv2", "node_type": "ConvLIF2d", "upscaling": 1, "channels": 32,  "kernel_size": 3, "stride": 2, "padding": [1, 1, 1, 1]},
+    {"node_index": "conv3", "node_type": "ConvLIF2d", "upscaling": 1, "channels": 64,  "kernel_size": 3, "stride": 2, "padding": [1, 1, 1, 1]},
+    {"node_index": "conv4", "node_type": "ConvLIF2d", "upscaling": 1, "channels": 64,  "kernel_size": 3, "stride": 2, "padding": [1, 1, 1, 1]},
+    {"node_index": "conv5", "node_type": "ConvLIF2d", "upscaling": 1, "channels": 128, "kernel_size": 5, "stride": 1, "padding": [0, 0, 0, 0]},
+    {"node_index": "out",   "node_type": "ConvLIF2d", "upscaling": 1, "channels": 5,   "kernel_size": 1, "stride": 1, "padding": [0, 0, 0, 0]}
+  ],
+  "edges": [
+    {"source": "input", "target": "conv1"},
+    {"source": "conv1", "target": "conv2"},
+    {"source": "conv2", "target": "conv3"},
+    {"source": "conv3", "target": "conv4"},
+    {"source": "conv4", "target": "conv5"},
+    {"source": "conv5", "target": "out"}
+  ],
+  "outputs": ["out"]
+}
