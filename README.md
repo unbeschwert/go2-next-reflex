@@ -21,6 +21,10 @@ Event camera ──► Data recording ──► SNN training ──► Kria KV26
 
 Use [the CVAT demo](labeling/README.md) to turn three clips from the local Durance gesture archive into labeling tasks. The `hello` clip includes a starter palm track. The other two clips are ready for annotation.
 
+## Five-class gesture training
+
+Use the [training instructions](training/README.md) to train a PyTorch spiking gesture classifier on the local archive.
+
 ## Team
 
 _TBD_

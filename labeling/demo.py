@@ -10,11 +10,10 @@ from zipfile import ZipFile
 import imageio_ffmpeg
 import numpy as np
 
+from event_data import SIZE, decode_recording
 
-SIZE = 320
 TICKS_PER_FRAME = 50_000
 PREVIEW_FPS = 20
-EVENT = np.dtype([("x", ">u2"), ("y", ">u2"), ("p", "u1"), ("t", ">u8")])
 PALETTE = np.array([(0, 0, 0), (255, 143, 84), (100, 213, 255), (255, 255, 255)], dtype=np.uint8)
 CLIPS = (
     "motion_buddy_dataset/01/gesture_03-hello-normal-01.bin",
@@ -22,19 +21,6 @@ CLIPS = (
     "motion_buddy_dataset/03/gesture_05-no-action-normal-01.bin",
 )
 SEED_PATH = Path(__file__).with_name("demo_keyframes.json")
-
-
-def decode_recording(raw, name):
-    payload = memoryview(raw)[4:]
-    if not payload or len(payload) % EVENT.itemsize or int.from_bytes(raw[:4], "big") != len(payload):
-        raise ValueError(f"Invalid event payload length in {name}")
-    events = np.frombuffer(payload, dtype=EVENT)
-    if events["x"].max() >= SIZE or events["y"].max() >= SIZE or events["p"].max() > 1:
-        raise ValueError(f"Invalid coordinates or polarity in {name}")
-    timestamps = events["t"].astype(np.uint64)
-    if np.any(timestamps[1:] < timestamps[:-1]):
-        raise ValueError(f"Nonmonotonic timestamps in {name}")
-    return events, timestamps
 
 
 def render_clip(events, timestamps, output):
