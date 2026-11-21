@@ -79,13 +79,28 @@ You need SSH key access to the server (`ssh user@host` must work without a passw
    - Adam, gradient clipping
    - weight clamp, ±2 px random shift
    - optional data augmentation (`augment:` block, off by default): [doc/data-augmentation.md](../doc/data-augmentation.md)
-   - The best epoch is picked by validation accuracy.
+   - The best epoch is picked by validation accuracy, or the last epochs are averaged (see [Training recipe options](#training-recipe-options)).
 4. **Choose formats** (see below).
-5. **QAT.** BatchNorm scales that weight decay shrank to ~0 are set to exactly 0, before and during QAT (otherwise QAT turns them into NaN; see [NaN during QAT](#nan-during-qat)). Then quantization-aware fine-tuning with BatchNorm **folded inside** the fake quantization (`prepare_qat(fused_bn=True)`). The network trains on the same rounded and clipped weights the FPGA will run.
+5. **QAT** (skipped with `quant.qat_epochs: 0`). BatchNorm scales that weight decay shrank to ~0 are set to exactly 0, before and during QAT (otherwise QAT turns them into NaN; see [NaN during QAT](#nan-during-qat)). Then quantization-aware fine-tuning with BatchNorm **folded inside** the fake quantization (`prepare_qat(fused_bn=True)`). The network trains on the same rounded and clipped weights the FPGA will run.
 6. **Fixed-point check.** Run the folded, quantized model with integer-grid arithmetic (`prepare_ptq`) on validation and test. This is the accuracy to trust. Float, QAT and fixed-point accuracies are all in `metrics.json`.
 7. **Export** to `runs/<run>/deploy/` (below).
 
 The whole dataset is kept on the GPU, so an epoch over ~2,700 clips takes seconds, not minutes.
+
+## Training recipe options
+
+All off by default, so older configs train as before. `configs/motion_buddy_40_v3.yaml` turns them on: our pipeline combined with the training choices of a teammate's v3 notebook.
+
+| Option | What it does | Why it helps |
+|---|---|---|
+| `model.neuron.learnable_leak: true`, `initial_tau: 2.0` | Each layer learns its own leak, starting at τ = 2 (the potential keeps 50 % per step). Exported as that layer's leak in `weights.txt` | Neurons react to recent *motion* (~20 ms) instead of slowly built-up background events. Leftover potential from the previous gesture fades within ~10 steps, which matters because the FPGA never resets |
+| `model.dropout: 0.2`, `dropout_layers: [1, 2, 3]` | Dropout2d on those layers' currents (riverops `SpikingConvBNDropout2d`), **float training only**. The model is rebuilt without it for quantization and export (same weights; riverops can't export the dropout layer type) | Spreads information across neurons; costs nothing on the FPGA |
+| `train.lr_min`, `cosine_epochs` | Cosine learning rate from `lr` to `lr_min` over `cosine_epochs` (default `epochs − average_last`), then constant | At a constant 3e-3 the weights keep bouncing: validation swung 59 ↔ 80 % between epochs |
+| `train.average_last: N` | The final float model is the average of the last N epochs' weights (BatchNorm statistics included) instead of the best single epoch | Lands in a flat minimum and avoids picking the luckiest of many noisy epochs on 2 validation people |
+| `augment.mixup` | Blends two clips and their spike-count targets ([doc/data-augmentation.md](../doc/data-augmentation.md)) | Graded rather than overconfident outputs |
+| v3 layer sizes (in the config) | 16 → 16 → **16** k6 s2 → **128 k6 s2** (2×2 output) → classes k2: 88.6 k weights instead of 175 k | The 2×2 output shares weights across positions, so it's partly position-independent. Our 256 × k9 layer on a 9×9 map is effectively fully connected, and fails on off-centre people. Changes `model.json`, so it needs its own firmware |
+
+Not known from the v3 notebook (it isn't on GitHub), so these are our assumptions: dropout after layers 1–3, the augmentation probabilities, mixup α = 0.4, cosine over the first 30 of 40 epochs.
 
 ## Quantization and the FPGA memory
 

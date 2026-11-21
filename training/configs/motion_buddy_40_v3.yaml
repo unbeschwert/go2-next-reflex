@@ -1,0 +1,52 @@
+# Combined setup: our pipeline with the training choices of a teammate's v3 notebook.
+#   1. learnable leak starting at tau = 2   2. flip + polarity augmentation   3. v3's layer sizes
+#   4. cosine LR 3e-3 → 5e-4, 40 epochs, batch 16, average of the last 10 epochs
+#   5. mixup   6. dropout 0.2 in the middle layers (training only)
+#   8-bit export: per-layer scaling sized for weights + biases, no QAT (best in our tests).
+# Assumptions (v3's notebook isn't on GitHub): dropout after layers 1-3, augmentation probabilities,
+# mixup alpha 0.4, cosine over the first 30 epochs. Train/val/test people unchanged (01-10 / 11-12 / 13-14).
+base: motion_buddy_40.yaml
+name: motion_buddy_40_v3
+
+data:
+  max_shift: 4                 # +-4 px
+
+model:
+  neuron:
+    initial_tau: 2.0           # potential keeps 50 % per step: reacts to recent motion
+    learnable_leak: true       # one tau per layer, exported as that layer's leak in weights.txt
+  layers:                      # 40 → 19 → 19 → 9 → 2 → 1   (v3: 88.6 k conv weights)
+    - {out: 16, kernel: 5, stride: 2, padding: 1}
+    - {out: 16, kernel: 3, stride: 1, padding: 1}
+    - {out: 16, kernel: 6, stride: 2, padding: 2}
+    - {out: 128, kernel: 6, stride: 2, padding: 0}   # 2x2 output: weights shared across positions
+    - {out: classes, kernel: 2, stride: 1, padding: 0}
+  dropout: 0.2
+  dropout_layers: [1, 2, 3]
+
+train:
+  epochs: 40
+  batch_size: 16
+  lr: 0.003
+  lr_min: 0.0005               # cosine 3e-3 → 5e-4 over epochs 1-30, then constant
+  average_last: 10             # final float model = average of epochs 31-40
+
+augment:
+  qat: true
+  dropout:    {p: 0.5, max: 0.4}                  # keep 60-100 % of the events
+  speed:      {p: 0.0}
+  time_shift: {p: 0.5, max_frames: 20}            # +-0.2 s
+  affine:     {p: 0.0}
+  flip:       {p: 0.5}
+  cutout:     {p: 0.0}
+  rate:       {p: 0.5, range: [0.7, 1.4]}
+  polarity:   {p: 0.3}
+  noise:      {p: 0.0}
+  hot_pixels: {p: 0.0}
+  warm_start: {p: 0.5, frames: [10, 50], from_clip: 0.5}   # ours: the FPGA never resets
+  mixup:      {p: 0.5, alpha: 0.4}
+
+quant:
+  layer_scaling: true          # per-layer formats via the threshold (see training/README.md)
+  layer_scale_biases: true     # biases must fit: clipping them broke the model
+  qat_epochs: 0                # no QAT: per-layer scaling alone was better

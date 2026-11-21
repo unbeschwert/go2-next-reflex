@@ -63,23 +63,32 @@ def describe(shapes: list[LayerShape]) -> str:
     return "\n".join(rows)
 
 
-def build_model(cfg: Config):
-    """riverops model: a stack of SpikingConvBN2d; forward returns spike counts per class [B, N]."""
+def build_model(cfg: Config, dropout: bool = False):
+    """riverops model: a stack of SpikingConvBN2d; forward returns spike counts per class [B, N].
+
+    dropout=True (float training only) uses SpikingConvBNDropout2d for model.dropout_layers. Dropout has no
+    parameters, so the state_dict is the same either way: quantization and export rebuild the model
+    without it (riverops can't export the dropout layer type)."""
     from torch import nn
     from riverops.nn import SpikingConvBN2d
+    from riverops.nn.spiking_conv import SpikingConvBNDropout2d
 
     neuron = cfg.model.neuron
+    model_cfg = cfg.model
+
+    def layer(s):
+        common = dict(kernel_size=s.kernel, stride=s.stride, padding=s.padding, bias=False,
+                      first_layer=s.index == 0, initial_tau=neuron.initial_tau,
+                      learnable_leak=neuron.learnable_leak, v_threshold=neuron.v_threshold,
+                      reset_mode=neuron.reset_mode)
+        if dropout and model_cfg.dropout and s.index in model_cfg.dropout_layers:
+            return SpikingConvBNDropout2d(s.in_c, s.out_c, dropout_p=model_cfg.dropout, **common)
+        return SpikingConvBN2d(s.in_c, s.out_c, **common)
 
     class SpikingClassifier(nn.Module):
         def __init__(self):
             super().__init__()
-            self.net = nn.Sequential(*[
-                SpikingConvBN2d(s.in_c, s.out_c, kernel_size=s.kernel, stride=s.stride, padding=s.padding,
-                                bias=False, first_layer=s.index == 0, initial_tau=neuron.initial_tau,
-                                learnable_leak=neuron.learnable_leak, v_threshold=neuron.v_threshold,
-                                reset_mode=neuron.reset_mode)
-                for s in layer_shapes(cfg)
-            ])
+            self.net = nn.Sequential(*[layer(s) for s in layer_shapes(cfg)])
 
         def forward(self, x, warmup: int = 0):   # x: [B, warmup + T, 2, H, W]
             # Spikes during a warm-start prefix (training augmentation) are not counted.

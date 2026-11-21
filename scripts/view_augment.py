@@ -47,7 +47,7 @@ def main() -> None:
 
     rows = [("original", None)]
     for f in dataclasses.fields(AugmentConfig):
-        if f.name != "qat":
+        if f.name not in ("qat", "mixup"):     # mixup blends clips of a batch (train.py), not shown here
             single = AugmentConfig()
             getattr(single, f.name).__dict__.update(dataclasses.asdict(getattr(cfg.augment, f.name)) | {"p": 1.0})
             rows.append((f.name.replace("_", " "), single))

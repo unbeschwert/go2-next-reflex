@@ -122,6 +122,12 @@ class HotPixelAug:
 
 
 @dataclass
+class MixupAug:
+    p: float = 0.0                     # probability per batch
+    alpha: float = 0.4                 # blend weight lambda ~ Beta(alpha, alpha); targets are blended the same way
+
+
+@dataclass
 class WarmStartAug:
     p: float = 0.0                     # probability per batch
     frames: list[int] = field(default_factory=lambda: [10, 50])      # prefix length (same for the batch)
@@ -143,6 +149,7 @@ class AugmentConfig:
     noise: NoiseAug = field(default_factory=NoiseAug)
     hot_pixels: HotPixelAug = field(default_factory=HotPixelAug)
     warm_start: WarmStartAug = field(default_factory=WarmStartAug)
+    mixup: MixupAug = field(default_factory=MixupAug)   # last: blends two augmented clips of the batch
 
     def active(self) -> list[str]:
         return [f.name for f in dataclasses.fields(self) if f.name != "qat" and getattr(self, f.name).p > 0]
@@ -168,6 +175,10 @@ class LayerConfig:
 class ModelConfig:
     neuron: NeuronConfig = field(default_factory=NeuronConfig)
     layers: list[LayerConfig] = field(default_factory=list)
+    # Dropout2d on the layer's currents (between BatchNorm and the neuron), training only: riverops
+    # SpikingConvBNDropout2d, which fuses to the same exported layer, so it costs nothing on the FPGA.
+    dropout: float = 0.0
+    dropout_layers: list[int] = field(default_factory=list)   # layer indices, e.g. [1, 2, 3]
 
 
 @dataclass
@@ -175,6 +186,13 @@ class TrainConfig:
     batch_size: int = 32
     epochs: int = 30
     lr: float = 0.003
+    # Learning-rate schedule: None = constant lr. Otherwise cosine from lr to lr_min over cosine_epochs
+    # (default: epochs - average_last), then constant lr_min.
+    lr_min: float | None = None
+    cosine_epochs: int | None = None
+    # Weight averaging: the final float model is the average of the last N epochs' weights instead of
+    # the single epoch with the best validation accuracy (0 = best epoch, as before).
+    average_last: int = 0
     weight_decay: float = 0.0001
     grad_clip: float = 1.0
     weight_clamp: float | None = 1.0   # clamp conv weights and BN affine params after each step
@@ -313,6 +331,19 @@ def validate(cfg: Config) -> None:
         raise ConfigError(f"fpga.strategy must be one of {STRATEGIES}")
     if not 0 <= f.reserve < 1:
         raise ConfigError("fpga.reserve must be in [0, 1)")
+    t, m = cfg.train, cfg.model
+    if t.average_last < 0 or t.average_last > t.epochs:
+        raise ConfigError("train.average_last must be 0..train.epochs")
+    if t.lr_min is not None and not 0 < t.lr_min <= t.lr:
+        raise ConfigError("train.lr_min must be in (0, train.lr]")
+    if t.cosine_epochs is not None and not 1 <= t.cosine_epochs <= t.epochs:
+        raise ConfigError("train.cosine_epochs must be 1..train.epochs")
+    if not 0 <= m.dropout < 1:
+        raise ConfigError("model.dropout must be in [0, 1)")
+    if any(not 0 <= i < len(m.layers) for i in m.dropout_layers):
+        raise ConfigError("model.dropout_layers: index out of range")
+    if m.neuron.learnable_leak and m.neuron.initial_tau <= 1:
+        raise ConfigError("model.neuron.initial_tau must be > 1 with learnable_leak")
     if cfg.model.neuron.reset_mode not in ("HARD", "SOFT"):
         raise ConfigError("model.neuron.reset_mode must be HARD or SOFT")
     validate_augment(cfg.augment, cfg.data)

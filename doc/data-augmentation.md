@@ -38,6 +38,7 @@ dropout → speed / time shift → zoom + rotation → flip → integer shift �
 | **hot_pixels** | 1–2 pixels that fire 2–20 events every frame | Every sensor has some; the dataset has one at (128, 231) firing ~21/frame | p 0.3 |
 | **cutout** | Blanks a random rectangle (20–40 % of the side) in every frame | Something in front of the person, arm leaving the image | off |
 | **polarity** | Swaps the ON and OFF channels | Dark clothes on a light background vs the opposite | off |
+| **mixup** | Blends two clips of the batch, x = λ·a + (1−λ)·b with λ ~ Beta(0.4, 0.4), and blends their spike-count targets the same way (fits the MSE-on-counts loss). Per batch, applied last | Gives graded rather than overconfident outputs between classes; a regulariser rather than a robot problem | off (`motion_buddy_40_v3`: p 0.5) |
 | **warm_start** | Puts 10–50 frames in front of the clip. Half the time they are the end of another clip, half the time empty. Only spikes after them count for the loss | **The FPGA never resets its potentials**, so on the robot each gesture starts from what came before | p 0.5 (per batch) |
 
 Flip, cutout and polarity are off in the main config. They are plausible, but for flip and polarity it's unclear the real camera needs them, so the `extras` ablation tests them first.
@@ -78,7 +79,7 @@ augment:
 
 ## Measuring what helps: ablations
 
-Turning on everything at once doesn't show which parts help. `training/configs/ablation/` has one config per group, each 100 float epochs + 10 QAT epochs on the same seed and splits:
+Turning on everything at once doesn't show which parts help. `training/configs/ablation/` has one config per group, each 50 float epochs + 10 QAT epochs on the same seed and splits. Running 7 at once only time-slices the GPU (about 100 s per epoch instead of 9 s), so `baseline` and `all` weren't run as ablations: without a learning-rate schedule their first epochs are the same as those of the 300-epoch runs `motion-buddy-40-e300` and `motion-buddy-40-aug`.
 
 | Config | Augmentations |
 |---|---|
@@ -99,17 +100,27 @@ done          # all fit on the A100 at once (~3 GB each)
 Compare the **fixed-point** accuracies in each `runs/abl-*/metrics.json`, and watch two things:
 
 - **The test set is only 2 people (~1,000 clips).** Differences of 2–3 points are within noise.
-- **Augmentation makes training harder.** Train accuracy drops, and the network may need more epochs to reach its best validation accuracy. A 100-epoch ablation underestimates it a little.
+- **Augmentation makes training harder.** Train accuracy drops, and the network may need more epochs to reach its best validation accuracy. A 50-epoch ablation underestimates it a little.
 
 ## Results
 
-*(filled in when the runs finish)*
+Fixed point = the 8-bit model as on the FPGA. Test = persons 13 and 14, who are recorded differently from everyone else (several people in the frame, off-centre subject, a moving distractor); see `scripts/eval_per_person.py`.
 
 | Run | Float val / test | Fixed point val / test |
 |---|---|---|
 | `motion-buddy-40-v1` (30 epochs, no aug) | 73.3 / 57.1 | 75.2 / 56.0 |
-| `motion-buddy-40-e300` (300 epochs, no aug) | 77.6 / 62.9 | pending |
-| `motion-buddy-40-aug` (300 epochs, full set) | pending | pending |
+| `motion-buddy-40-e300` (300 epochs, no aug, Q2.6 + QAT) | 77.6 / 62.9 | 78.0 / 60.0 |
+| `abl-spatial` (50 epochs) | 78.6 / 65.4 | 72.5 / 60.7 |
+| `abl-extras` (50 epochs, everything + flip, cutout, polarity) | 74.9 / 59.6 | 74.9 / 62.9 |
+| `abl-warm-start` (50 epochs) | 78.0 / 54.2 | 79.1 / 57.7 |
+| `abl-temporal` (50 epochs) | 72.9 / 53.9 | 74.9 / 57.3 |
+| `abl-camera` (50 epochs) | 72.5 / 57.3 | 70.6 / 59.3 |
+| `motion-buddy-40-aug` (300 epochs, full set, Q3.5 + QAT) | 84.0 / 70.3 | 82.1 / 66.3 |
+| `motion-buddy-40-aug-lsA0` (same float model, per-layer scaling Q1.7, no QAT) | 84.0 / 70.3 | **83.2 / 67.9** |
+
+- Augmentation is the big win: +7 test points in float. Per person, test person 13 went 71 → 78 % and person 14 50 → 62 %; *dance* recall 32–44 → 93 %. *Sit* for the off-centre person 14 is still weak.
+- Spatial augmentation helps test most among the groups; temporal and camera augmentation show no gain on these test people (they differ in framing and clutter, not timing or sensor).
+- With 2 test people, ±2–3 points is noise.
 
 ## Related fix: NaN in QAT after long training
 

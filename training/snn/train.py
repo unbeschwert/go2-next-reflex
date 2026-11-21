@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import csv
 import json
+import math
 import random
 import time
 from pathlib import Path
@@ -55,12 +56,19 @@ class SplitData:
     def __len__(self) -> int:
         return len(self.y)
 
-    def batch(self, index: torch.Tensor, augment: bool) -> tuple[torch.Tensor, torch.Tensor, int]:
-        """Encoded frames [B, W+T, 2, H, W], labels, and W = warm-start prefix frames (0 unless augmenting)."""
-        counts, warmup = self.x[index].float(), 0
+    def batch(self, index: torch.Tensor, augment: bool):
+        """Encoded frames [B, W+T, 2, H, W], labels, W = warm-start prefix frames (0 unless augmenting),
+        and mix = (permutation, lambda) if mixup blended this batch with itself, else None."""
+        counts, warmup, mix = self.x[index].float(), 0, None
         if augment:
             counts, warmup = augment_counts(counts, self.cfg)
-        return encode(counts, self.cfg), self.y[index], warmup
+            m = self.cfg.augment.mixup
+            if m.p and torch.rand(()) < m.p:
+                lam = float(torch.distributions.Beta(m.alpha, m.alpha).sample())
+                perm = torch.randperm(len(counts), device=counts.device)
+                counts = lam * counts + (1 - lam) * counts[perm]
+                mix = (perm, lam)
+        return encode(counts, self.cfg), self.y[index], warmup, mix
 
 
 def encode(counts: torch.Tensor, cfg: Config) -> torch.Tensor:
@@ -108,9 +116,13 @@ def run_epoch(model, data: SplitData, cfg: Config, optimizer=None, clamp: float 
     confusion = torch.zeros(n, n, dtype=torch.long)
     with torch.set_grad_enabled(training):
         for index in order.split(cfg.train.batch_size):
-            x, y, warmup = data.batch(index, augment=training and augment)
+            x, y, warmup, mix = data.batch(index, augment=training and augment)
             scores = model(x, warmup=warmup)
-            loss = spike_count_loss(scores, spike_targets(y, T, n, cfg), T)
+            targets = spike_targets(y, T, n, cfg)
+            if mix is not None:                     # mixup: blend the spike-count targets like the inputs
+                perm, lam = mix
+                targets = lam * targets + (1 - lam) * targets[perm]
+            loss = spike_count_loss(scores, targets, T)
             if not torch.isfinite(loss):
                 raise FloatingPointError(f"loss is {loss.item()} ({'training' if training else 'evaluation'}); "
                                          "see 'NaN during QAT' in training/README.md")
@@ -136,31 +148,67 @@ def run_epoch(model, data: SplitData, cfg: Config, optimizer=None, clamp: float 
             "spikes": spikes / len(data) / n}
 
 
+def lr_schedule(cfg: Config):
+    """epoch (1-based) → learning rate: cosine from train.lr to train.lr_min over train.cosine_epochs
+    (default: epochs - average_last), then constant lr_min. None if train.lr_min is not set."""
+    t = cfg.train
+    if t.lr_min is None:
+        return None
+    n = t.cosine_epochs or max(1, t.epochs - t.average_last)
+    return lambda epoch: t.lr_min + (t.lr - t.lr_min) * 0.5 * (1 + math.cos(math.pi * min(epoch - 1, n) / n))
+
+
 def fit(model, train: SplitData, val: SplitData, cfg: Config, *, epochs: int, lr: float, phase: str,
-        clamp: float | None, history: list, run_dir: Path, augment: bool = True, after_step=None):
+        clamp: float | None, history: list, run_dir: Path, augment: bool = True, after_step=None,
+        schedule=None, average_last: int = 0):
+    """Train; return the model with the best validation accuracy, or with average_last > 0 the average
+    of the weights of the last average_last epochs (no selection on validation)."""
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=cfg.train.weight_decay)
     best_acc, best_state = -1.0, copy.deepcopy(model.state_dict())
+    average, averaged = None, 0
     for epoch in range(1, epochs + 1):
         start = time.time()
+        if schedule:
+            for group in optimizer.param_groups:
+                group["lr"] = schedule(epoch)
         tr = run_epoch(model, train, cfg, optimizer, clamp, augment=augment, after_step=after_step)
         va = run_epoch(model, val, cfg)
         improved = va["acc"] > best_acc
         if improved:
             best_acc, best_state = va["acc"], copy.deepcopy(model.state_dict())
-        history.append({"phase": phase, "epoch": epoch, "train_loss": tr["loss"], "train_acc": tr["acc"],
+        if average_last and epoch > epochs - average_last:
+            state = model.state_dict()
+            if average is None:
+                average = {k: v.detach().clone().float() if v.is_floating_point() else v.clone() for k, v in state.items()}
+            else:
+                for k, v in state.items():
+                    average[k] = average[k] + v.float() if v.is_floating_point() else v.clone()
+            averaged += 1
+        history.append({"phase": phase, "epoch": epoch, "lr": optimizer.param_groups[0]["lr"],
+                        "train_loss": tr["loss"], "train_acc": tr["acc"],
                         "val_loss": va["loss"], "val_acc": va["acc"], "val_spikes": va["spikes"],
                         "seconds": time.time() - start})
-        print(f"[{phase}] epoch {epoch:3d}/{epochs}  train loss {tr['loss']:.4f} acc {tr['acc']:.1%}  "
+        print(f"[{phase}] epoch {epoch:3d}/{epochs}  lr {optimizer.param_groups[0]['lr']:.2e}  "
+              f"train loss {tr['loss']:.4f} acc {tr['acc']:.1%}  "
               f"val loss {va['loss']:.4f} acc {va['acc']:.1%} spikes {va['spikes']:.1f}  ({time.time() - start:.0f}s)"
               f"{'  *best' if improved else ''}", flush=True)
         write_history(history, run_dir)
+    if average is not None:
+        reference = model.state_dict()
+        model.load_state_dict({k: (v / averaged).to(reference[k].dtype) if reference[k].is_floating_point() else v
+                               for k, v in average.items()})
+        va = run_epoch(model, val, cfg)
+        print(f"[{phase}] average of the last {averaged} epochs: val acc {va['acc']:.1%} "
+              f"(best single epoch was {best_acc:.1%}; the average is used)", flush=True)
+        return model, va["acc"]
     model.load_state_dict(best_state)
     return model, best_acc
 
 
 def write_history(history: list, run_dir: Path) -> None:
+    fields = list(dict.fromkeys(k for row in history for k in row))   # older rows may lack newer columns
     with open(run_dir / "history.csv", "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(history[0]))
+        writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(history)
 
@@ -217,9 +265,10 @@ def train(cfg: Config, cache: dict, run_dir: Path) -> dict:
     history: list[dict] = []
 
     # 1. Float training (notebook recipe).
-    model = build_model(cfg).to(device)
+    model = build_model(cfg, dropout=True).to(device)
     model, _ = fit(model, splits["train"], splits["val"], cfg, epochs=cfg.train.epochs, lr=cfg.train.lr,
-                   phase="float", clamp=cfg.train.weight_clamp, history=history, run_dir=run_dir)
+                   phase="float", clamp=cfg.train.weight_clamp, history=history, run_dir=run_dir,
+                   schedule=lr_schedule(cfg), average_last=cfg.train.average_last)
     save_checkpoint(run_dir / "float_best.pt", model, cfg, None, "float")
     return quantize(model, cfg, splits, run_dir, history)
 
@@ -240,6 +289,9 @@ def qat_from_float(cfg: Config, cache: dict, run_dir: Path) -> dict:
 
 def quantize(model, cfg: Config, splits: dict, run_dir: Path, history: list) -> dict:
     device = next(model.parameters()).device
+    plain = build_model(cfg).to(device)            # same weights, without the training-only dropout layers
+    plain.load_state_dict(model.state_dict())
+    model = plain.eval()
     float_val, float_test = run_epoch(model, splits["val"], cfg), run_epoch(model, splits["test"], cfg)
 
     # 2. Choose the number formats from the BN-folded parameters.

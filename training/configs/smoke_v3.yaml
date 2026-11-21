@@ -1,0 +1,7 @@
+# Tiny run of motion_buddy_40_v3 (dropout, LR schedule, mixup, weight averaging, learnable leak,
+# per-layer scaling without QAT) to check the pipeline end to end.
+base: motion_buddy_40_v3.yaml
+name: smoke_v3
+data: {limit_per_split: 64}
+train: {epochs: 3, average_last: 2}
+augment: {mixup: {p: 1.0}}

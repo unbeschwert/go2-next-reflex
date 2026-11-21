@@ -33,7 +33,7 @@ for split in ("val", "test"):
     preds = []
     with torch.no_grad():
         for i in range(0, len(data), 64):
-            x, _, _ = data.batch(torch.arange(i, min(i + 64, len(data)), device=dev), augment=False)
+            x, _, _, _ = data.batch(torch.arange(i, min(i + 64, len(data)), device=dev), augment=False)
             preds.append(model(x).argmax(1).cpu())
     pred = torch.cat(preds).numpy(); y = data.y.cpu().numpy()
     print(f"\n{split}: {np.mean(pred == y):.1%} over {len(y)} clips")
