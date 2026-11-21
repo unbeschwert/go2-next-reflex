@@ -18,3 +18,12 @@ log/
 .vscode/
 .idea/
 .DS_Store
+
+# Local setup: downloaded Go2 model and organiser firmware/weights (not committed)
+meshes/
+go2.urdf
+go2_description.urdf
+*.bit.bin
+*.dtbo
+weights.txt
+*parameters*.txt
