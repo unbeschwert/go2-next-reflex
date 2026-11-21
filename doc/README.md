@@ -14,6 +14,7 @@ Most of this is condensed from the organisers' RIVER SDK docs at https://riversd
 | [training-snn.md](training-snn.md) | Training an SNN with `riverops`: the reference notebook, the library, quantization and export |
 | [deploy-model.md](deploy-model.md) | Putting a trained SNN on the Kria: bitstream, server config, camera config, weights file |
 | [go2-kria-overview.md](go2-kria-overview.md) | The ROS 2 workspace: SNN scores → Go2 commands, building it for the Kria |
+| [gesture-pipeline.md](gesture-pipeline.md) | **Our working setup:** best model on the FPGA, Python bridge to the real Go2, browser/RViz views, simulator, gotchas |
 
 ## End-to-end workflow
 

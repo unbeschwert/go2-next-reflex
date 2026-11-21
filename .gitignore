@@ -18,3 +18,16 @@ log/
 .vscode/
 .idea/
 .DS_Store
+
+# Go2 3D model for RViz (downloaded by laptop/rviz/fetch_go2_model.sh)
+laptop/rviz/meshes/
+laptop/rviz/go2.urdf
+laptop/rviz/go2_description.urdf
+
+# Organiser-supplied FPGA firmware and trained weights (not ours to publish)
+*.bit.bin
+*.dtbo
+weights.txt
+weights.json
+*parameters*.txt
+firmware-kv260*.tar.gz

@@ -19,7 +19,15 @@ Event camera ──► Data recording ──► SNN training ──► Kria KV26
 
 ## Repository structure
 
-_To be defined as the project evolves._
+| Path | Contents |
+|---|---|
+| `doc/` | Team notes: board setup, data capture, dataset, training, deployment, ROS 2 side |
+| `kria/` | Runs on the Kria: inference control script, FPGA output → Go2 command bridge, live SNN view |
+| `laptop/` | Runs on the laptop: ROS 2 env files, simulator, animated Go2 in RViz |
+| `models/` | Model graph JSON examples for the riversdk.dev firmware generator |
+| `scripts/` | Helper scripts (event recording viewer) |
+
+Start with [doc/gesture-pipeline.md](doc/gesture-pipeline.md) to run the gesture → Go2 pipeline.
 
 ## Team
 
