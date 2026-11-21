@@ -113,10 +113,13 @@ Compare the **fixed-point** accuracies in each `runs/abl-*/metrics.json`, and wa
 
 ## Related fix: NaN in QAT after long training
 
-The 300-epoch run without augmentation trained fine, then QAT produced NaN in its first batch. The network went silent (val loss exactly 16.0 = all-zero output) and every exported weight was "clipped". The cause was weight decay. Over 300 epochs it drove the BatchNorm scale γ of 34 of the 256 layer-3 channels to ~5·10⁻⁴¹, a denormal float. The float model doesn't mind: those channels just output a constant. But riverops' fusion-aware QAT divides by the folded scale γ/√(var+ε), and its gradient divides by the scale squared, which overflows to inf, then NaN.
+The 300-epoch run without augmentation trained fine. QAT then went NaN: the network went silent (val loss exactly 16.0 = all-zero output, since a NaN potential never crosses the threshold) and the export reported every weight as "clipped". Two fixes were needed, because the first rested on an incomplete diagnosis:
+
+1. **First look:** 32 of the 256 layer-3 BatchNorm scales γ had shrunk to ~5·10⁻⁴¹ (denormal floats) during float training. riverops' fusion-aware QAT divides by the folded scale γ/√(var+ε), and its gradient by the scale squared, which overflows. Zeroing those γ once before QAT (riverops treats an exact 0 as a special case) only moved the failure: QAT ran three good epochs, then went NaN in epoch 4.
+2. **Traced** (`scripts/fpga_debug/qat_nan_trace.py` checks every gradient before clipping): step 312, `net.3.bn.weight[140]`, γ = 2.3·10⁻¹³. The real mechanism is **channels whose input never changes**. Their running variance is ~0 and their normalized output is always 0, so the loss gives their γ no gradient. Only weight decay acts on it, and shrinks it smoothly towards 0. Channel 140 was above the 10⁻⁶ cutoff at the start of QAT and became tiny *during* QAT. One inf gradient turns every weight into NaN through gradient clipping, which divides by the total norm.
 
 The pipeline now:
-- sets any BatchNorm γ with |γ| < 10⁻⁶ to exactly 0 before QAT (riverops handles a 0 scale as a special case). The log says `zeroed N dead BatchNorm channel(s)` and `metrics.json` has `dead_batchnorm_channels`;
-- stops with an error on any non-finite loss instead of silently training on NaN.
+- sets every γ with |γ| < 10⁻⁶ to exactly 0, **before QAT and after every QAT step** (`zero_tiny_gammas` in `train.py`). It changes no outputs: such a channel outputs its BN bias whatever γ is. Above 10⁻⁶ the gradient stays finite (≲10¹⁴, float32 goes to 3·10³⁸);
+- after each training epoch, checks every parameter and stops with the parameter's name if any is non-finite. A NaN shows up as a silent network, not in the loss, so a loss check alone misses it.
 
 To redo only the quantization part of a run from its `float_best.pt`, use `remote/qat.sh <run>` on the server, or `python -m training.snn qat --run-dir runs/<run>` locally.

@@ -81,7 +81,7 @@ You need SSH key access to the server (`ssh user@host` must work without a passw
    - optional data augmentation (`augment:` block, off by default): [doc/data-augmentation.md](../doc/data-augmentation.md)
    - The best epoch is picked by validation accuracy.
 4. **Choose formats** (see below).
-5. **QAT.** BatchNorm channels that weight decay shrank to ~0 are zeroed first (otherwise QAT turns them into NaN; see [NaN during QAT](#nan-during-qat)). Then quantization-aware fine-tuning with BatchNorm **folded inside** the fake quantization (`prepare_qat(fused_bn=True)`). The network trains on the same rounded and clipped weights the FPGA will run.
+5. **QAT.** BatchNorm scales that weight decay shrank to ~0 are set to exactly 0, before and during QAT (otherwise QAT turns them into NaN; see [NaN during QAT](#nan-during-qat)). Then quantization-aware fine-tuning with BatchNorm **folded inside** the fake quantization (`prepare_qat(fused_bn=True)`). The network trains on the same rounded and clipped weights the FPGA will run.
 6. **Fixed-point check.** Run the folded, quantized model with integer-grid arithmetic (`prepare_ptq`) on validation and test. This is the accuracy to trust. Float, QAT and fixed-point accuracies are all in `metrics.json`.
 7. **Export** to `runs/<run>/deploy/` (below).
 
@@ -148,7 +148,7 @@ Redo everything after float training (formats, QAT, fixed-point check, export) f
 
 ## NaN during QAT
 
-Symptom: the QAT epochs show `spikes 0.0` and val loss exactly `16.0000` (all-zero output), and the export says 100 % of the weights are clipped (they are NaN). Long float runs can shrink some BatchNorm γ to denormals (~1e-41). Fusion-aware QAT divides by them and gets inf, then NaN. The pipeline now zeroes such γ before QAT and stops on any non-finite loss. For older runs, `remote/qat.sh <run>` redoes QAT. Details: [doc/data-augmentation.md](../doc/data-augmentation.md#related-fix-nan-in-qat-after-long-training).
+Symptom: the QAT epochs show `spikes 0.0` and val loss exactly `16.0000` (all-zero output), and the export says 100 % of the weights are clipped (they are NaN). Cause: channels whose input never changes. Weight decay alone shrinks their BatchNorm γ towards 0, and fusion-aware QAT divides by it (the gradient by its square) → inf → NaN everywhere. The pipeline now zeroes any |γ| < 1e-6 before QAT and after every QAT step, and stops with an error naming the parameter if a weight becomes non-finite. For runs made before this fix, `remote/qat.sh <run>` redoes QAT. Details: [doc/data-augmentation.md](../doc/data-augmentation.md#related-fix-nan-in-qat-after-long-training).
 
 ## Things to keep consistent
 

@@ -3,7 +3,8 @@
     python -m training.snn check   --config training/configs/motion_buddy_40.yaml
     python -m training.snn prepare --config ...            # build the event-count cache
     python -m training.snn train   --config ... --run-dir runs/NAME   # prepare + check + train + export
-    python -m training.snn qat     --run-dir runs/NAME     # redo formats + QAT + export from float_best.pt
+    python -m training.snn qat     --run-dir runs/NAME [--set quant.layer_scaling=true ...]
+                                                           # redo formats + QAT + export from float_best.pt
     python -m training.snn export  --run-dir runs/NAME     # re-export from runs/NAME/qat_best.pt
 
 `check` and `prepare` need only numpy/pyyaml; `train` and `export` need the `train` dependency group
@@ -39,6 +40,26 @@ def check(cfg) -> dict:
     return report
 
 
+def apply_overrides(cfg, overrides: list[str]):
+    """'quant.layer_scaling=true' → set cfg.quant.layer_scaling = True (value parsed as YAML), validated."""
+    import yaml
+    from .config import Config, _build, validate
+    raw = cfg.to_dict()
+    for item in overrides:
+        key, sep, value = item.partition("=")
+        if not sep:
+            raise ConfigError(f"--set expects SECTION.KEY=VALUE, got {item!r}")
+        node, parts = raw, key.split(".")
+        for part in parts[:-1]:
+            if not isinstance(node.get(part), dict):
+                raise ConfigError(f"--set: no config section {key!r}")
+            node = node[part]
+        node[parts[-1]] = yaml.safe_load(value)
+    new = _build(Config, raw, "config")
+    validate(new)
+    return new
+
+
 def git_info() -> dict:
     def run(*args):
         try:
@@ -63,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run-dir", required=True)
     p = sub.add_parser("qat")
     p.add_argument("--run-dir", required=True)
+    p.add_argument("--set", action="append", default=[], metavar="SECTION.KEY=VALUE",
+                   help="override the run's config (YAML value), saved back to the run's config.yaml")
     p.add_argument("--workers", type=int, default=min(16, os.cpu_count() or 4))
     args = parser.parse_args(argv)
 
@@ -81,6 +104,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "qat":
             run_dir = Path(args.run_dir)
             cfg = load_config(run_dir / "config.yaml")
+            if args.set:
+                cfg = apply_overrides(cfg, args.set)
+                save_config(cfg, run_dir / "config.yaml")
+                print(f"config overrides: {', '.join(args.set)}", flush=True)
             start = time.time()
             cache = data_mod.build_cache(cfg, data_mod.discover(cfg), workers=args.workers)
             from .export import export_deployment

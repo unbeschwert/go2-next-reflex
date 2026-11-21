@@ -90,8 +90,16 @@ def clamp_parameters(model: nn.Module, limit: float) -> None:
                         p.clamp_(-limit, limit)
 
 
+def check_finite(model: nn.Module, where: str) -> None:
+    """NaN weights don't show in the loss (a NaN potential never crosses the threshold → silent network)."""
+    bad = [name for name, p in model.named_parameters() if not torch.isfinite(p).all()]
+    if bad:
+        raise FloatingPointError(f"non-finite parameters after {where}: {', '.join(bad)}; "
+                                 "see 'NaN during QAT' in training/README.md")
+
+
 def run_epoch(model, data: SplitData, cfg: Config, optimizer=None, clamp: float | None = None,
-              augment: bool = True) -> dict:
+              augment: bool = True, after_step=None) -> dict:
     training = optimizer is not None
     model.train(training)
     T, n = cfg.data.time_steps, cfg.n_classes
@@ -113,24 +121,28 @@ def run_epoch(model, data: SplitData, cfg: Config, optimizer=None, clamp: float 
                 optimizer.step()
                 if clamp:
                     clamp_parameters(model, clamp)
+                if after_step:
+                    after_step()
             predicted = scores.argmax(dim=1)
             total_loss += loss.item() * len(y)
             spikes += scores.detach().sum().item()
             correct += (predicted == y).sum().item()
             for t, p in zip(y.tolist(), predicted.tolist()):
                 confusion[t, p] += 1
+    if training:
+        check_finite(model, "a training epoch")
     # spikes: mean output spikes per clip and class; 0 means the network is silent
     return {"loss": total_loss / len(data), "acc": correct / len(data), "confusion": confusion.tolist(),
             "spikes": spikes / len(data) / n}
 
 
 def fit(model, train: SplitData, val: SplitData, cfg: Config, *, epochs: int, lr: float, phase: str,
-        clamp: float | None, history: list, run_dir: Path, augment: bool = True):
+        clamp: float | None, history: list, run_dir: Path, augment: bool = True, after_step=None):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=cfg.train.weight_decay)
     best_acc, best_state = -1.0, copy.deepcopy(model.state_dict())
     for epoch in range(1, epochs + 1):
         start = time.time()
-        tr = run_epoch(model, train, cfg, optimizer, clamp, augment=augment)
+        tr = run_epoch(model, train, cfg, optimizer, clamp, augment=augment, after_step=after_step)
         va = run_epoch(model, val, cfg)
         improved = va["acc"] > best_acc
         if improved:
@@ -166,20 +178,25 @@ def load_qat_model(path: Path, cfg: Config):
     return model.eval(), formats
 
 
-def zero_dead_batchnorm(model: nn.Module, limit: float = 1e-6) -> int:
-    """Set BatchNorm scales that weight decay has shrunk to ~0 (often denormals like 5e-41) to exactly 0.
+def zero_tiny_gammas(model: nn.Module, limit: float = 1e-6) -> int:
+    """Set every BatchNorm scale gamma with |gamma| < limit to exactly 0; returns how many.
 
-    Such a channel outputs a constant (its bias) anyway. But fusion-aware QAT divides by the folded scale
-    gamma / sqrt(var + eps), and its gradient by the scale squared, which overflows → inf → NaN in the
-    first backward pass. riverops treats an exact 0 scale as a special case, so 0 is safe.
+    Fusion-aware QAT divides by the folded scale gamma / sqrt(var + eps), and its gradient by the scale
+    squared, which overflows (inf → NaN in all weights after gradient clipping) once gamma is ~1e-13.
+    It happens to channels whose input never changes (running var ~0): the loss gives their gamma no
+    gradient, so weight decay shrinks it smoothly towards 0, during float training (300 epochs: 32 of
+    256 layer-3 gammas at ~5e-41) and during QAT. Their output is the BN bias whatever gamma is, so 0
+    changes nothing, and riverops handles an exact 0 scale as a special case. Called before QAT and
+    after every QAT step (a gamma may only get small during QAT).
     """
     zeroed = 0
     with torch.no_grad():
         for module in model.modules():
             if isinstance(module, nn.BatchNorm2d) and module.weight is not None:
-                dead = module.weight.abs() < limit
-                module.weight[dead] = 0.0
-                zeroed += int(dead.sum())
+                tiny = (module.weight.abs() < limit) & (module.weight != 0)
+                if tiny.any():
+                    module.weight[tiny] = 0.0
+                    zeroed += int(tiny.sum())
     return zeroed
 
 
@@ -222,9 +239,9 @@ def quantize(model, cfg: Config, splits: dict, run_dir: Path, history: list) -> 
     float_val, float_test = run_epoch(model, splits["val"], cfg), run_epoch(model, splits["test"], cfg)
 
     # 2. Choose the number formats from the BN-folded parameters.
-    zeroed = zero_dead_batchnorm(model)
+    zeroed = zero_tiny_gammas(model)
     if zeroed:
-        print(f"zeroed {zeroed} dead BatchNorm channel(s) (|gamma| < 1e-6) before QAT", flush=True)
+        print(f"zeroed {zeroed} BatchNorm gamma(s) with |gamma| < 1e-6 (dead channels) before QAT", flush=True)
     formats, format_info = choose_formats(model.cpu(), cfg)
     model.to(device)
     print(f"formats: {formats.describe()}  ({format_info})", flush=True)
@@ -234,7 +251,8 @@ def quantize(model, cfg: Config, splits: dict, run_dir: Path, history: list) -> 
     qat = prepare_qat(model, formats.riverops(), fused_bn=True).to(device)
     if cfg.quant.qat_epochs:
         qat, _ = fit(qat, splits["train"], splits["val"], cfg, epochs=cfg.quant.qat_epochs, lr=cfg.quant.qat_lr,
-                     phase="qat", clamp=None, history=history, run_dir=run_dir, augment=cfg.augment.qat)
+                     phase="qat", clamp=None, history=history, run_dir=run_dir, augment=cfg.augment.qat,
+                     after_step=lambda: zero_tiny_gammas(qat))
     save_checkpoint(run_dir / "qat_best.pt", qat, cfg, formats, "qat")
     qat_val, qat_test = run_epoch(qat, splits["val"], cfg), run_epoch(qat, splits["test"], cfg)
 
