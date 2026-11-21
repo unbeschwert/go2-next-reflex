@@ -21,7 +21,7 @@ from riverops.nn import BatchNorm2d, Conv2d, prepare_ptq, prepare_qat
 from .augment import augment as augment_counts
 from .config import Config
 from .model import build_model
-from .quant import Formats, choose_formats
+from .quant import Formats, apply_layer_scales, choose_formats, layer_scales
 
 
 def pick_device(name: str) -> torch.device:
@@ -166,8 +166,10 @@ def write_history(history: list, run_dir: Path) -> None:
 
 
 def save_checkpoint(path: Path, model, cfg: Config, formats: Formats | None, phase: str) -> None:
+    # Thresholds are plain attributes, not in the state_dict; per-layer scaling changes them.
     torch.save({"state_dict": model.state_dict(), "config": cfg.to_dict(), "phase": phase,
-                "formats": formats.to_dict() if formats else None}, path)
+                "formats": formats.to_dict() if formats else None,
+                "thresholds": [float(layer.lif.v_threshold) for layer in model.net]}, path)
 
 
 def load_qat_model(path: Path, cfg: Config):
@@ -175,6 +177,8 @@ def load_qat_model(path: Path, cfg: Config):
     formats = Formats(**checkpoint["formats"])
     model = prepare_qat(build_model(cfg), formats.riverops(), fused_bn=True)
     model.load_state_dict(checkpoint["state_dict"])
+    for layer, threshold in zip(model.net, checkpoint.get("thresholds") or []):
+        layer.lif.v_threshold = threshold
     return model.eval(), formats
 
 
@@ -243,8 +247,12 @@ def quantize(model, cfg: Config, splits: dict, run_dir: Path, history: list) -> 
     if zeroed:
         print(f"zeroed {zeroed} BatchNorm gamma(s) with |gamma| < 1e-6 (dead channels) before QAT", flush=True)
     formats, format_info = choose_formats(model.cpu(), cfg)
+    scales, scale_info = layer_scales(model, formats, cfg)
+    apply_layer_scales(model, scales, cfg.model.neuron.v_threshold)
     model.to(device)
     print(f"formats: {formats.describe()}  ({format_info})", flush=True)
+    print(f"per-layer scale k (weights, bias, threshold / k): {scales}  "
+          f"{[(s['need'], s['fits']) for s in scale_info]}", flush=True)
 
     # 3. Quantization-aware fine-tuning with BN folded inside the fake quantization,
     #    so training sees exactly the clipped, rounded weights the FPGA will get.
@@ -265,6 +273,8 @@ def quantize(model, cfg: Config, splits: dict, run_dir: Path, history: list) -> 
         "augment": cfg.augment.active(),
         "formats": formats.to_dict() | {"description": formats.describe()},
         "format_choice": format_info,
+        "layer_scales": scale_info,
+        "thresholds": [float(layer.lif.v_threshold) for layer in qat.net],
         "dead_batchnorm_channels": zeroed,
         "float": {"val_acc": float_val["acc"], "test_acc": float_test["acc"]},
         "qat": {"val_acc": qat_val["acc"], "test_acc": qat_test["acc"]},

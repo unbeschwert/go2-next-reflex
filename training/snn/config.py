@@ -193,6 +193,11 @@ class QuantConfig:
     potential_int_bits: int = 4        # Q4.12 → spleat-server scaling 4096
     qat_epochs: int = 10
     qat_lr: float = 0.0001
+    # One weight format for all layers (the firmware takes one), but each layer has its own threshold in
+    # weights.txt. A layer whose folded weights/biases don't fit the format is divided by a power of 2,
+    # k, together with its threshold (same spikes, wider range, coarser steps for that layer only).
+    layer_scaling: bool = False
+    max_layer_scale: int = 16
 
 
 @dataclass

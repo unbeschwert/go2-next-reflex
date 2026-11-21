@@ -48,6 +48,8 @@ quant:
   potential_int_bits: 4      # Q4.12 → spleat-server scaling 4096
   qat_epochs: 10
   qat_lr: 0.0001
+  layer_scaling: false       # per-layer threshold scaling; tested: no gain once QAT runs (training/README.md)
+  max_layer_scale: 16
 
 fpga:
   board: kv260

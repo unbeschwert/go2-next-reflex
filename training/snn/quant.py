@@ -57,18 +57,24 @@ def folded_params(model) -> list[tuple[torch.Tensor, torch.Tensor]]:
     return out
 
 
+def _percentile(values: torch.Tensor, pct: float) -> float:
+    return torch.quantile(values.float(), pct / 100).item() if len(values) < 16_000_000 else values.max().item()
+
+
 def choose_formats(model, cfg: Config) -> tuple[Formats, dict]:
     """Pick the weight int bits: the fewest that hold the folded weights (at the configured
     percentile) and all folded biases. Fewer int bits = more fractional precision for the same
-    memory, since the total width (and so the BRAM cost) is fixed by quant.weight_bits."""
+    memory, since the total width (and so the BRAM cost) is fixed by quant.weight_bits.
+
+    With quant.layer_scaling, the format only has to hold the weights of all layers together (in
+    practice the big layers); a layer that doesn't fit is scaled instead (layer_scales)."""
     q = cfg.quant
     params = folded_params(model)
     weights = torch.cat([w.flatten().abs() for w, _ in params])
     biases = torch.cat([b.flatten().abs() for _, b in params])
-    w_need = torch.quantile(weights.float(), q.weight_percentile / 100).item() if len(weights) < 16_000_000 \
-        else weights.max().item()
+    w_need = _percentile(weights, q.weight_percentile)
     b_need = biases.max().item() if len(biases) else 0.0
-    need = max(w_need, b_need, 1e-9)
+    need = max(w_need, 1e-9) if q.layer_scaling else max(w_need, b_need, 1e-9)
     if q.weight_int_bits == "auto":
         # signed Q<I>.<F> holds [-2^(I-1), 2^(I-1) - 2^-F]: need 2^(I-1) >= need
         int_bits = min(max(1, math.ceil(math.log2(need)) + 1), q.weight_bits - 1)
@@ -79,6 +85,33 @@ def choose_formats(model, cfg: Config) -> tuple[Formats, dict]:
     info = {"folded_weight_abs_max": weights.max().item(), f"folded_weight_abs_p{q.weight_percentile}": w_need,
             "folded_bias_abs_max": b_need, "chosen": formats.describe()}
     return formats, info
+
+
+def layer_scales(model, formats: Formats, cfg: Config) -> tuple[list[int], list[dict]]:
+    """Per layer, the smallest power of 2 k such that the layer's folded weights (at the configured
+    percentile) and all its folded biases, divided by k, fit the weight format. 1 = unchanged."""
+    q = cfg.quant
+    limit = formats.weight.max_int / formats.weight.scale
+    scales, info = [], []
+    for i, (w, b) in enumerate(folded_params(model)):
+        need = max(_percentile(w.flatten().abs(), q.weight_percentile), b.abs().max().item() if b.numel() else 0.0)
+        k = 1
+        if q.layer_scaling:
+            while need / k > limit and k < q.max_layer_scale:
+                k *= 2
+        scales.append(k)
+        info.append({"layer": i, "need": round(need, 4), "k": k, "fits": need / k <= limit})
+    return scales, info
+
+
+def apply_layer_scales(model, scales: list[int], threshold: float) -> None:
+    """Divide each layer's BatchNorm affine (so the folded weights and bias) and its threshold by k."""
+    with torch.no_grad():
+        for layer, k in zip(model.net, scales):
+            if k != 1:
+                layer.bn.weight /= k
+                layer.bn.bias /= k
+            layer.lif.v_threshold = threshold / k
 
 
 def saturation(values: list[int], fmt: FixedPointFormat) -> float:

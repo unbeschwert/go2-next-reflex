@@ -73,7 +73,9 @@ def export_deployment(qat_model, formats: Formats, cfg: Config, run_dir: Path, m
     (out / "memory_report.md").write_text(fpga.report_markdown(memory, cfg))
 
     summary = {"parameters": len(values), "saturation": sat, "memory_verdict": memory["verdict"],
-               "formats": formats.to_dict()}
+               "formats": formats.to_dict(),
+               # per layer, in potential-format integers; != 2^potential_frac where a layer is scaled
+               "thresholds": [int(p["threshold"]) for p in layers]}
     (out / "DEPLOY.md").write_text(deploy_markdown(cfg, formats, memory, sat, metrics))
     (out / "export_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     per_layer = ", ".join(f"{v:.1%}" for v in sat["per_layer_weights"])
