@@ -1,0 +1,30 @@
+# Go2 Next Reflex
+
+**Robotics Hackathon 2026 – Durance AI / Durance Robot Lab track: "Give a robot dog its next reflex"**
+
+## Challenge
+
+Build a new event-vision behavior for a **Unitree Go2 X**:
+
+1. **Record** event-camera data
+2. **Train** a spiking neural network (SNN)
+3. **Deploy** it on a **AMD Kria KV260** board
+4. **React** – make the robot respond through **ROS 2**
+
+## Pipeline
+
+```
+Event camera ──► Data recording ──► SNN training ──► Kria KV260 inference ──► ROS 2 ──► Unitree Go2 X
+```
+
+## Repository structure
+
+_To be defined as the project evolves._
+
+## Team
+
+_TBD_
+
+## License
+
+_TBD_
