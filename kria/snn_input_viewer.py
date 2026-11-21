@@ -170,7 +170,7 @@ p{color:#999;font-size:14px;max-width:480px}</style></head><body>
 <img id="v" src="/stream" alt="live SNN view">
 <p>Top: the exact 80x80 event frames sent to the FPGA (white = brighter, blue = darker, last 50 ms).
 Bars: how often each FPGA output fired in the last 0.5 s. A gesture triggers a trick when its bar
-stays above 0.35 and clearly beats the others.</p>
+stays at or above 0.50 for 0.4 s and beats the next gesture output by 0.20 (o4 "none" is not compared).</p>
 <script>const v=document.getElementById('v');v.onerror=()=>setTimeout(()=>{v.src='/stream?'+Date.now()},1000);</script>
 </body></html>"""
 

@@ -34,10 +34,10 @@ Laptop (192.168.77.2, cable to the Kria's built-in port)
 | `kria/robot_link.sh` | Kria | ROS 2 env for the real Go2 (domain 0, `/etc/cyclonedds/cyclonedds-go2.xml`) |
 | `kria/laptop_link.sh` | Kria | ROS 2 env for the laptop link (test domain 42 over `eth0`) |
 | `kria/board_screen_pub.py` | Kria | Publishes the board's X screen as `/kria/camera_view` (optional) |
-| `kria/event_web_viewer.py` | Kria | Raw 320×320 camera in a browser via v4l2. **Needs the camera to itself** - stop inference first |
+| `kria/event_web_viewer.py` | Kria | Raw 320×320 camera in a browser via v4l2 on port 8081. **Needs the camera to itself** - stop inference first |
 | `ros2/env.sh` | Laptop | Jazzy + locally unpacked CycloneDDS, loopback-only domain 73 (simulator) |
 | `ros2/env_board_link.sh` | Laptop | Same, but domain 42 over the cable to the Kria (RViz mirrors the board) |
-| `ros2/sim_playground.py` | Laptop | Fake SPLEAT server + `robot_sim` + real pipeline; type gesture numbers to test the action mapping |
+| `ros2/sim_playground.py` | Laptop | Fake SPLEAT server + `robot_sim` + the C++ `go2-kria` pipeline (`gesture_node`, `action_bridge`); type gesture numbers to test *that* pipeline's action mapping. It does not run `kria/live_gesture_bridge.py` |
 | `ros2/rviz/` | Laptop | Animated Go2 in RViz driven by `/api/sport/request` (`fetch_go2_model.sh` downloads the URDF once) |
 | `models/gesture_snn_example.json` | - | Example River Model Graph (2×80×80 → 5) used to test the firmware generator |
 
@@ -120,7 +120,8 @@ The RViz dog is an animation of the commanded trick, not a physics simulation.
   the model fire o0 at ~1.0 and the dog loops Sit → Stand up. Put it on a table or tripod facing
   the person.
 - **Only one program can use the camera**: despot (inference), river-tools capture and
-  `event_web_viewer.py` exclude each other. `snn_input_viewer.py` is passive and always fine.
+  `event_web_viewer.py` exclude each other. `snn_input_viewer.py` is passive and always fine (it keeps
+  port 8080 even after `inference.sh stop`, so `event_web_viewer.py` uses 8081).
 - **Laptop firewall (ufw):** river-tools needs `sudo ufw allow in on eno1 from 192.168.77.0/24 to any port 3333 proto tcp`;
   ROS 2 to/from the board needs `sudo ufw allow in on eno1 from 192.168.77.0/24`.
 - **Laptop network:** a NetworkManager profile with a static IP is needed

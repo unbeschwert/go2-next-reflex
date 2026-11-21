@@ -55,6 +55,17 @@ def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+def recv_exact(s, n):
+    """Read exactly n bytes. recv(MSG_WAITALL) can return less when the timeout hits."""
+    buf = bytearray()
+    while len(buf) < n:
+        chunk = s.recv(n - len(buf))
+        if not chunk:
+            raise OSError("server closed connection")
+        buf += chunk
+    return bytes(buf)
+
+
 class Bridge:
     def __init__(self, host, port, require_clear=False, dry_run=False, viz=True):
         self.host, self.port = host, port
@@ -71,6 +82,7 @@ class Bridge:
         self.busy_until = 0.0
         self.follow_up = None
         self.candidate, self.cand_since = None, 0.0
+        self.armed = True        # False after a trick until the gesture outputs calm down
         self.status = "waiting for board..."
         # Real robot safety: only start a trick while obstacle_detection reports CLEAR
         self.clearance, self.clear_names, self.last_hold_log = None, {}, 0.0
@@ -96,23 +108,29 @@ class Bridge:
     # ---------- board connection ----------
     def reader(self):
         while rclpy.ok():
+            s = None
             try:
                 s = socket.create_connection((self.host, self.port), timeout=3)
                 s.settimeout(3)
                 self.connected = True
                 log(f"connected to FPGA model server {self.host}:{self.port}")
                 while rclpy.ok():
-                    head = s.recv(4, socket.MSG_WAITALL)
-                    if len(head) < 4:
-                        raise OSError("server closed connection")
+                    head = recv_exact(s, 4)
                     n = struct.unpack(">I", head)[0]
-                    d = s.recv(n, socket.MSG_WAITALL)
+                    d = recv_exact(s, n)
+                    # CBOR map {"payload": <byte string>, ...}: "payload" key, then the
+                    # byte-string header (0x40+len for len < 24, 0x58 <len> up to 255)
                     k = d.find(b"\x67payload")
-                    if k < 0:
+                    if k < 0 or k + 10 > len(d):
                         continue
                     h = d[k + 8]
-                    L, off = (h & 0x1F, k + 9) if h < 0x58 else (d[k + 9], k + 10)
-                    if L != 4 * N_OUT:
+                    if 0x40 <= h < 0x58:
+                        L, off = h - 0x40, k + 9
+                    elif h == 0x58:
+                        L, off = d[k + 9], k + 10
+                    else:
+                        continue
+                    if L != 4 * N_OUT or off + L > len(d):
                         continue
                     scores = struct.unpack(f"<{N_OUT}f", d[off:off + L])
                     with self.lock:
@@ -124,6 +142,9 @@ class Bridge:
                 self.connected = False
                 log(f"board connection lost ({e}); retrying in 1 s")
                 time.sleep(1)
+            finally:
+                if s is not None:
+                    s.close()
 
     # ---------- decision ----------
     def send(self, api_id, label):
@@ -157,7 +178,7 @@ class Bridge:
         if not full:
             return
         gestures = [i for i in range(N_OUT) if ACTIONS.get(i) is not None]
-        if not getattr(self, "armed", True):
+        if not self.armed:
             if max(r[i] for i in gestures) < QUIET_RATE:
                 self.armed = True
                 log("calm - ready for the next gesture")
@@ -187,7 +208,8 @@ class Bridge:
             self.candidate = None
             return
         log(f"gesture output o{winner} won (rate {r[winner]:.2f}, next gesture "
-            f"{r[second] if second is not None else 0:.2f}, none-output {r[4]:.2f})")
+            f"{r[second] if second is not None else 0:.2f}, none-output "
+            f"{max((r[i] for i in range(N_OUT) if ACTIONS.get(i) is None), default=0):.2f})")
         self.send(api_id, label)
         self.status = f"o{winner} -> {label}"
         self.busy_until = now + secs + (0 if follow else COOLDOWN_S)

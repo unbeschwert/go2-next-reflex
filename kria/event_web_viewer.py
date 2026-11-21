@@ -2,7 +2,8 @@
 """Live browser viewer for the GenX320 event camera on the Kria.
 
 Reads EVT 2.1 events from /dev/video0 (via v4l2-ctl), accumulates them into
-frames and serves an MJPEG stream.  Open http://<kria-ip>:8080 in a browser.
+frames and serves an MJPEG stream.  Open http://<kria-ip>:8081 in a browser
+(8080 is taken by snn_input_viewer.py, which keeps running after inference.sh stop).
 
 Robustness:
   * the sensor's Event Rate Controller (ERC) is enabled so bursts cannot
@@ -18,7 +19,7 @@ import numpy as np
 import cv2
 
 W = H = 320
-PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8081
 FPS = 30
 SCALE = 2
 ERC_RATE = 5_000_000          # max events/s let through by the sensor
@@ -31,6 +32,7 @@ OFFS = np.arange(32, dtype=np.int32)
 chunks = collections.deque()
 chunks_lock = threading.Lock()
 backlog = [0]
+session = [0]                 # incremented on every capture (re)start
 last_data = [time.time()]
 latest_jpeg = None
 status = {"ev_per_s": 0, "restarts": 0, "dropped": 0}
@@ -65,6 +67,8 @@ def capture_loop():
         first = False
         setup_sensor()
         p = start_capture()
+        session[0] += 1
+        offset = 0                # byte position of the next chunk in this capture's stream
         last_data[0] = time.time()
         stop = threading.Event()
 
@@ -82,10 +86,11 @@ def capture_loop():
                 break
             last_data[0] = time.time()
             with chunks_lock:
-                chunks.append(chunk)
+                chunks.append((session[0], offset, chunk))
+                offset += len(chunk)
                 backlog[0] += len(chunk)
                 while backlog[0] > MAX_BACKLOG:
-                    old = chunks.popleft()
+                    _, _, old = chunks.popleft()
                     backlog[0] -= len(old)
                     status["dropped"] += len(old)
         stop.set()
@@ -116,6 +121,7 @@ def decode(data, on, off):
 def renderer():
     global latest_jpeg
     leftover = b""
+    expect = None             # (session, offset) the next chunk must have to follow leftover
     count = 0
     last_stat = time.time()
     while True:
@@ -124,7 +130,14 @@ def renderer():
             parts = list(chunks)
             chunks.clear()
             backlog[0] = 0
-        data = leftover + b"".join(parts)
+        if parts and parts[0][:2] != expect:
+            # data was dropped or the capture restarted: realign to the 8-byte EVT words
+            leftover = b""
+            parts[0] = (*parts[0][:2], parts[0][2][(-parts[0][1]) % 8:])
+        if parts:
+            sess, pos, last = parts[-1]
+            expect = (sess, pos + len(last))
+        data = leftover + b"".join(c for _, _, c in parts)
         n8 = len(data) // 8 * 8
         leftover = data[n8:]
         on = np.zeros((H, W), bool)
