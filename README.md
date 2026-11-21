@@ -30,6 +30,7 @@ Event camera ──► Data recording ──► SNN training ──► Kria KV26
 | `models/` | Model graph JSON examples for the riversdk.dev firmware generator |
 
 Start with [doc/gesture-pipeline.md](doc/gesture-pipeline.md) to run the gesture → Go2 pipeline.
+For laptop-only testing, follow [Docker and RViz on Wayland](doc/gesture-pipeline.md#docker-and-rviz-on-wayland).
 
 ## Team
 

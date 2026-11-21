@@ -11,7 +11,7 @@ Usage:
 
 Then type a command and press Enter:
     0..N-1   perform that gesture for 1.5 s (model output = 1.0 for that class)
-    n        nobody in front of the camera (all scores 0)
+    n        nobody in front of the camera
     o        toggle an obstacle 0.4 m in front of the robot
     q        quit
 """
@@ -36,6 +36,8 @@ DVS_LABELS = ["hand clap", "right hand wave", "left hand wave", "right arm cw",
               "right arm ccw", "left arm cw", "left arm ccw", "arm roll",
               "air drums", "air guitar", "other"]
 LABELS = DVS_LABELS if N == len(DVS_LABELS) else [f"class {i}" for i in range(N)]
+# The reference bridge picks the first class on a tie, so idle must favor "other".
+IDLE_SCORES = tuple(float(label == "other") for label in LABELS)
 ACTIONS = {1001: "Damp", 1003: "StopMove", 1004: "StandUp", 1005: "StandDown (lie down)",
            1006: "RecoveryStand", 1009: "Sit", 1010: "RiseSit", 1016: "Hello (wave paw)",
            1017: "Stretch", 1020: "Content", 1022: "Dance1", 1023: "Dance2",
@@ -45,7 +47,7 @@ CLEARANCE = {Clearance.CLEAR: "CLEAR", Clearance.OBSTACLE: "BLOCKED (obstacle)",
 GESTURE_SECONDS = 1.5
 FRAME_HZ = 100
 
-state = {"scores": [0.0] * N, "until": 0.0, "obstacle": False, "stop": False}
+state = {"scores": IDLE_SCORES, "until": 0.0, "obstacle": False, "stop": False}
 lock = threading.Lock()
 
 
@@ -74,7 +76,7 @@ def fake_spleat(server):
             while not state["stop"]:
                 with lock:
                     if state["until"] and time.monotonic() > state["until"]:
-                        state["scores"], state["until"] = [0.0] * N, 0.0
+                        state["scores"], state["until"] = IDLE_SCORES, 0.0
                         say("gesture finished -> nobody in view")
                     scores = list(state["scores"])
                 conn.sendall(cbor_frame(scores))
@@ -148,8 +150,8 @@ def main():
                 break
             if cmd == "n":
                 with lock:
-                    state["scores"], state["until"] = [0.0] * N, 0.0
-                say("nobody in view (all scores 0)")
+                    state["scores"], state["until"] = IDLE_SCORES, 0.0
+                say("nobody in view")
             elif cmd == "o":
                 state["obstacle"] = not state["obstacle"]
                 say(f"obstacle {'PLACED' if state['obstacle'] else 'REMOVED'}")

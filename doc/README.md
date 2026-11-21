@@ -16,8 +16,8 @@ Most of this is condensed from the organisers' RIVER SDK docs at https://riversd
 | [data-augmentation.md](data-augmentation.md) | **Data augmentation** for robustness: what each one does and why, config, ablation runs, the QAT NaN fix |
 | [deploy-model.md](deploy-model.md) | Putting a trained SNN on the Kria: bitstream, server config, camera config, weights file |
 | [fpga-debugging.md](fpga-debugging.md) | **Learning record**: why the FPGA and the simulation disagreed (potentials never reset), each hypothesis and its test |
-| [go2-kria-overview.md](go2-kria-overview.md) | The ROS 2 workspace: SNN scores → Go2 commands, building it for the Kria |
-| [gesture-pipeline.md](gesture-pipeline.md) | **Our working setup:** best model on the FPGA, Python bridge to the real Go2, browser/RViz views, simulator, gotchas |
+| [go2-kria-overview.md](go2-kria-overview.md) | ROS 2 entry points, topics, reference action map and Yocto build for the Kria |
+| [gesture-pipeline.md](gesture-pipeline.md) | FPGA inference, Python bridge for the Go2, and [laptop simulation in Docker with RViz](gesture-pipeline.md#docker-and-rviz-on-wayland) |
 
 ## End-to-end workflow
 
@@ -30,16 +30,19 @@ Most of this is condensed from the organisers' RIVER SDK docs at https://riversd
  5. Firmware       riversdk.dev "firmware jobs" (model.json)
                    ──► spleat.bit.bin + spleat.dtbo                  (deploy-model.md)
  6. Deploy         scp bitstream, config.yaml, metavision_camera.json, weights.txt to the Kria
- 7. ROS 2          adapt go2-kria to the new outputs, cross-compile, deploy (go2-kria-overview.md)
- 8. Run            SPLEAT server + despot camera app + ros2 launch bringup pipeline.launch.py
+ 7. ROS 2          install go2-kria's Humble overlay, copy kria/ scripts, check output order
+ 8. Run            inference.sh start --headless, then inference.sh robot --dry-run
 ```
 
 At run time:
 
 ```
 GenX320 ─► despot (events → frames, 100 Hz, downsampled) ─► SPLEAT server (SNN on the FPGA, TCP :3333)
-        ─► gesture_node ─► action_bridge (+ obstacle_detection) ─► /api/sport/request ─► Go2
+        ─► live_gesture_bridge.py (+ obstacle_detection) ─► /api/sport/request ─► Go2
 ```
+
+The supplied 11-class C++ launch and the laptop simulator share the reference
+pipeline. [Go2 entry points](go2-kria-overview.md#entry-points)
 
 ## Downloads (from the RIVER SDK download list)
 
@@ -53,7 +56,7 @@ All of these go in `data/`, which git ignores.
 | `yocto-hackathon-img.gz` | SD-card image for the Kria, to re-flash if the board breaks |
 | `x86_64_sdk_installer.sh` / `arm_sdk_installer.sh` | Yocto cross-compile SDK for your laptop type |
 | `go2-kria-generated.zip` | The ROS 2 workspace (`go2-kria`) |
-| `ros-docker-original.zip` | Original contractor ROS Docker setup |
+| `ros-docker-original.zip` | Original generic Humble and Yocto Docker environment with an example package |
 
 Re-flashing the SD card (**check the device name with `lsblk` first: `dd` overwrites whatever you point it at**):
 
@@ -70,4 +73,6 @@ gzip -dc yocto-hackathon-img.gz | sudo dd of=/dev/sdX bs=4M status=progress conv
 | Number of outputs | 5 classes | `config.yaml` example: 5 ✓ | expects **11** scores (DVS-Gesture) ✗ |
 | Potential format | Q4.12 | `scaling: 4096` = 2¹² ✓ | – |
 
-So before deploying, either train at a size despot can produce (e.g. 80×80 or 40×40), or confirm how 32×32 input is meant to work. And change `go2-kria` from 11 to 5 outputs (see [go2-kria-overview.md](go2-kria-overview.md)).
+Train at a size despot can produce, such as 80×80 or 40×40. The tracked Python
+bridge accepts five scores. Check its action table against your model's output
+order before enabling robot commands. [Python bridge mapping](gesture-pipeline.md#decision-rules)
