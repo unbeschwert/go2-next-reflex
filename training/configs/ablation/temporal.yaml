@@ -1,0 +1,7 @@
+# Ablation: temporal augmentation only (speed, time shift), 50 epochs.
+base: ../motion_buddy_40.yaml
+name: ablation_temporal
+train: {epochs: 50}
+augment:
+  speed: {p: 0.5, range: [0.8, 1.25]}
+  time_shift: {p: 0.5, max_frames: 20}

@@ -12,7 +12,10 @@ Most of this is condensed from the organisers' RIVER SDK docs at https://riversd
 | [capture-data.md](capture-data.md) | Recording your own event clips with `river-tools` |
 | [motion-buddy-dataset.md](motion-buddy-dataset.md) | The supplied gesture dataset: file format, classes, statistics, viewing clips |
 | [training-snn.md](training-snn.md) | Training an SNN with `riverops`: the reference notebook, the library, quantization and export |
+| [../training/README.md](../training/README.md) | **Our training pipeline**: GPU server, configs, KV260 memory-aware quantization, export to the Kria |
+| [data-augmentation.md](data-augmentation.md) | **Data augmentation** for robustness: what each one does and why, config, ablation runs, the QAT NaN fix |
 | [deploy-model.md](deploy-model.md) | Putting a trained SNN on the Kria: bitstream, server config, camera config, weights file |
+| [fpga-debugging.md](fpga-debugging.md) | **Learning record**: why the FPGA and the simulation disagreed (potentials never reset), each hypothesis and its test |
 | [go2-kria-overview.md](go2-kria-overview.md) | The ROS 2 workspace: SNN scores → Go2 commands, building it for the Kria |
 
 ## End-to-end workflow
@@ -20,7 +23,7 @@ Most of this is condensed from the organisers' RIVER SDK docs at https://riversd
 ```
  1. Capture        river-tools capture  ──► samples/*.bin            (capture-data.md)
  2. Inspect        scripts/view_events.py                            (motion-buddy-dataset.md)
- 3. Train          riverops + PyTorch   ──► model.pt                 (training-snn.md)
+ 3. Train          remote/train.sh on the GPU server ──► runs/<name>/  (training/README.md)
  4. Export         export_for_river + export_params
                    ──► model.json (layers) + weights.txt (integers)
  5. Firmware       riversdk.dev "firmware jobs" (model.json)

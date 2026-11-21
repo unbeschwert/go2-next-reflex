@@ -1,0 +1,16 @@
+# Tiny run with every augmentation on (including the optional ones), to check the pipeline end to end.
+base: smoke.yaml
+name: smoke_aug
+data: {max_shift: 4}
+augment:
+  dropout: {p: 0.5}
+  speed: {p: 0.5}
+  time_shift: {p: 0.5}
+  affine: {p: 0.5}
+  flip: {p: 0.5}
+  cutout: {p: 0.3}
+  rate: {p: 0.5}
+  polarity: {p: 0.2}
+  noise: {p: 0.5}
+  hot_pixels: {p: 0.3}
+  warm_start: {p: 1.0}

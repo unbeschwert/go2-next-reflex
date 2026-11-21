@@ -18,3 +18,13 @@ log/
 .vscode/
 .idea/
 .DS_Store
+
+# Training outputs and caches
+runs/
+cache/
+
+# Server address (see remote/remote.env.example)
+remote/remote.env
+
+# Firmware builds from riversdk.dev (download per job, not source)
+firmware-*.tar.gz

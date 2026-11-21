@@ -1,0 +1,6 @@
+# Ablation: warm start only (prefix of empty frames or another clip's end), 50 epochs.
+base: ../motion_buddy_40.yaml
+name: ablation_warm_start
+train: {epochs: 50}
+augment:
+  warm_start: {p: 0.5, frames: [10, 50], from_clip: 0.5}

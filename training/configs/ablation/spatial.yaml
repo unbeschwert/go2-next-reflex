@@ -1,0 +1,7 @@
+# Ablation: spatial augmentation only (bigger shift, zoom + rotation), 50 epochs.
+base: ../motion_buddy_40.yaml
+name: ablation_spatial
+data: {max_shift: 4}
+train: {epochs: 50}
+augment:
+  affine: {p: 0.5, scale: [0.8, 1.2], rotate_deg: 10}

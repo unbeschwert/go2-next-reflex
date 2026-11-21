@@ -1,0 +1,4 @@
+# Ablation: the full recommended set (motion_buddy_40_aug.yaml), but 50 epochs.
+base: ../motion_buddy_40_aug.yaml
+name: ablation_all
+train: {epochs: 50}

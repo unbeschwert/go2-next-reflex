@@ -1,0 +1,25 @@
+# motion_buddy_40 + data augmentation (doc/data-augmentation.md), 300 float epochs.
+# Everything not set here comes from the base config.
+base: motion_buddy_40.yaml
+name: motion_buddy_40_aug
+
+data:
+  max_shift: 4               # +-4 px (was 2): people stand in different places
+
+train:
+  epochs: 300
+
+augment:
+  qat: true                  # keep augmenting during the 10 QAT epochs
+  # p = probability per clip (warm_start: per batch); 0 = off
+  dropout:    {p: 0.5, max: 0.3}                     # thin out up to 30 % of the events
+  speed:      {p: 0.5, range: [0.8, 1.25]}           # gesture slower / faster
+  time_shift: {p: 0.5, max_frames: 20}               # gesture starts up to 200 ms earlier / later
+  affine:     {p: 0.5, scale: [0.8, 1.2], rotate_deg: 10}   # distance to the dog, camera tilt
+  flip:       {p: 0.0}       # mirror; fine for these 5 classes, off until tested
+  cutout:     {p: 0.0, size: [0.2, 0.4]}             # occlusion; off until tested
+  rate:       {p: 0.5, range: [0.7, 1.3]}            # lighting / camera bias
+  polarity:   {p: 0.0}       # swap ON/OFF; off until tested
+  noise:      {p: 0.5, max_rate: 0.3}                # background events per pixel per frame (median ~1)
+  hot_pixels: {p: 0.3, max_count: 2, rate: [2, 20]}  # dataset's own hot pixel fires ~21/frame
+  warm_start: {p: 0.5, frames: [10, 50], from_clip: 0.5}   # the FPGA never resets its potentials
