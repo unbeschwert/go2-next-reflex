@@ -119,6 +119,8 @@ def deploy_markdown(cfg: Config, f: Formats, memory: dict, sat: dict, metrics: d
 The two formats **must** be exactly these: `weights.txt` holds integers in these formats, and the form
 defaults (Q4.12 / Q4.12) are different. Download `firmware-kv260.tar.gz` when the job is done and unpack it
 next to this file (it should contain the bitstream `spleat.bit.bin` and the overlay `spleat.dtbo`).
+Or from the command line: `uv run scripts/firmware_job.py submit --run runs/<this run> --download`
+(reuses an existing job when the model and options are identical; see doc/deploy-model.md).
 
 Memory estimate: {memory['verdict']}: {memory['bram_only']:.1f} of {memory['bram_total']} BRAM36 if all in
 BRAM; see `memory_report.md`.
