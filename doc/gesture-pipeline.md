@@ -5,9 +5,10 @@ SPLEAT FPGA, a small Python bridge turns its outputs into Unitree sport commands
 Go2 reacts to gestures**. A 3D Go2 in RViz and a browser view are available for testing without
 the robot. Code: `kria/` (runs on the board), `ros2/` (ROS 2 side, runs on the laptop).
 
-This is a Python alternative to the C++ `gesture_node` + `action_bridge` in `go2-kria`
-([go2-kria-overview.md](go2-kria-overview.md)): no cross-compiling, and it handles the 5-output
-model directly.
+The Python bridge handles five outputs and runs as a script on the Kria. It uses the
+`unitree_api` and `msgs` bindings and the `obstacle_detection` node from the installed
+`go2-kria` overlay. The overlay also ships an 11-output C++ gesture pipeline used by
+the laptop simulator. [Go2 workspace and build](go2-kria-overview.md)
 
 ```
 Kria KV260
@@ -37,7 +38,7 @@ Laptop (192.168.77.2, cable to the Kria's built-in port)
 | `kria/event_web_viewer.py` | Kria | Raw 320×320 camera in a browser via v4l2 on port 8081. **Needs the camera to itself** - stop inference first |
 | `ros2/env.sh` | Laptop | Jazzy + locally unpacked CycloneDDS, loopback-only domain 73 (simulator) |
 | `ros2/env_board_link.sh` | Laptop | Same, but domain 42 over the cable to the Kria (RViz mirrors the board) |
-| `ros2/sim_playground.py` | Laptop | Fake SPLEAT server + `robot_sim` + the C++ `go2-kria` pipeline (`gesture_node`, `action_bridge`); type gesture numbers to test *that* pipeline's action mapping. It does not run `kria/live_gesture_bridge.py` |
+| `ros2/sim_playground.py` | Laptop | Runs the C++ `go2-kria` pipeline with a fake SPLEAT server, fake LiDAR and `robot_sim` |
 | `ros2/rviz/` | Laptop | Animated Go2 in RViz driven by `/api/sport/request` (`fetch_go2_model.sh` downloads the URDF once) |
 | `models/gesture_snn_example.json` | - | Example River Model Graph (2×80×80 → 5) used to test the firmware generator |
 
@@ -87,7 +88,7 @@ tail -f /tmp/bridge.log               # what it decides
 
 Watch http://192.168.77.1:8080 to see which motion raises which output.
 
-### Decision rules (`kria/live_gesture_bridge.py`)
+### Decision rules
 
 | Setting | Value | Meaning |
 |---|---|---|
@@ -98,9 +99,24 @@ Watch http://192.168.77.1:8080 to see which motion raises which output.
 | `QUIET_RATE` | 0.20 | re-arm only after all gesture outputs drop below this (breaks self-triggering loops) |
 | `--require-clear` | robot mode | trick starts only while `/durance/clearance` is CLEAR (0.5 m radius) |
 
-`ACTIONS` maps outputs to tricks: o0 → Sit (+ Stand up), o1 → Hello, o2 → Dance, o3 → Stretch,
-o4 → none. o4 is clearly "no gesture" (it dominates when nobody moves); **o0–o3 are placeholders**
-until each dataset gesture has been checked against the bars.
+The bridge publishes `unitree_api/msg/Request` on `/api/sport/request` and sets
+`header.identity.api_id`. Its action durations and Stand Up follow-up use local timers.
+In robot mode, the first command requires a `CLEAR` value on `/durance/clearance`.
+That value has no expiry in the bridge, and the timed Stand Up follow-up bypasses the
+clearance check. [Python bridge](../kria/live_gesture_bridge.py)
+
+The Python action table was set up as a placeholder for the supplied model. The training
+column below is the output order for models trained with `motion_buddy_40.yaml`. The
+class order of the weights currently running on the Kria has yet to be verified.
+[Action table](../kria/live_gesture_bridge.py) · [Training config](../training/configs/motion_buddy_40.yaml)
+
+| Output | Training label | Python bridge action | API ID |
+|---|---|---|---|
+| 0 | Sit | Sit, then Stand Up | `1009`, then `1004` |
+| 1 | Lay down | Hello | `1016` |
+| 2 | Hello | Dance | `1022` |
+| 3 | Dance | Stretch | `1017` |
+| 4 | No action | None | |
 
 ## Test without the robot
 
@@ -109,12 +125,89 @@ until each dataset gesture has been checked against the bars.
   `env_board_link.sh` uses the wired port `eno1` by default; if yours has another name
   (`ip -br link`), set it first: `export KRIA_IFACE=enp3s0`.
   Test commands by hand: `ros2 topic pub --once /api/sport/request unitree_api/msg/Request "{header: {identity: {api_id: 1016}}}"`.
-- **Laptop only:** build `go2-kria/src` with colcon on Jazzy, then `python3 ros2/sim_playground.py`.
-  CycloneDDS was installed without sudo:
+- **Laptop only with Docker:** follow [Docker and RViz on Wayland](#docker-and-rviz-on-wayland).
+- **Laptop with Jazzy installed locally:** build `go2-kria/src` with colcon, point `GO2_WS`
+  at the built workspace, source `ros2/env.sh`, then run `python3 ros2/sim_playground.py`.
+  On a host without sudo, the extra packages can be unpacked locally with:
   `apt-get download ros-jazzy-cyclonedds ros-jazzy-rmw-cyclonedds-cpp ros-jazzy-rosidl-generator-dds-idl nlohmann-json3-dev ros-jazzy-iceoryx-{binding-c,hoofs,posh}`
   and `dpkg-deb -x` each into `$GO2_EXTRA` (see `ros2/env.sh`).
 
-The RViz dog is an animation of the commanded trick, not a physics simulation.
+RViz animates the commanded tricks. The fake robot acknowledges requests and publishes
+a simulated sport mode state. The playground uses the 11-class DVS-Gesture action map.
+[Reference action table](go2-kria-overview.md#reference-action-table)
+
+### Docker and RViz on Wayland
+
+This laptop-only setup uses Jazzy and XWayland. It was tested with Docker on an AMD64
+host running Sway, using software OpenGL. Docker runs the simulator and RViz in a
+single container with `--network none`. CycloneDDS uses loopback on domain 73 inside
+that container. This setup needs Docker Engine, a local XWayland display, and the
+`data/go2-kria/src/` tree extracted from `go2-kria-generated.zip`.
+
+From the repository root, download the Go2 model and build a local simulator image.
+This builds all 12 packages for the laptop and uses the Jazzy desktop image for RViz.
+
+```bash
+bash ros2/rviz/fetch_go2_model.sh
+
+docker build --progress plain --tag go2-rviz:jazzy --file - data/go2-kria/src <<'DOCKERFILE'
+FROM osrf/ros:jazzy-desktop-full-noble
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        nlohmann-json3-dev ros-jazzy-cyclonedds \
+        ros-jazzy-rmw-cyclonedds-cpp ros-jazzy-rosidl-generator-dds-idl \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/go2-sim
+COPY . src/
+RUN --network=none bash -c 'source /opt/ros/jazzy/setup.bash && CMAKE_BUILD_PARALLEL_LEVEL=2 colcon build --merge-install --parallel-workers 2 --cmake-args -DBUILD_TESTING=OFF'
+DOCKERFILE
+```
+
+Run the following in Bash from the same repository root. It uses the socket for the
+local XWayland display in `$DISPLAY` and runs RViz as your user. On the tested Sway
+session, the existing XWayland access rules allowed that user to connect. If RViz
+reports that it cannot connect to the display, check that `DISPLAY` is set in the
+desktop session and that the corresponding socket and user authorization are available.
+The repository's `ros2/` directory is mounted at the same absolute path so RViz can
+resolve the URDF's mesh paths.
+
+```bash
+display_number=${DISPLAY#:}
+x11_socket=/tmp/.X11-unix/X${display_number%%.*}
+
+docker run -dit --name go2-rviz --network none \
+    --user "$(id -u):$(id -g)" \
+    --env DISPLAY --env HOME=/tmp --env QT_QPA_PLATFORM=xcb \
+    --env QT_X11_NO_MITSHM=1 --env LIBGL_ALWAYS_SOFTWARE=1 \
+    --env GO2_WS=/opt/go2-sim \
+    --mount "type=bind,src=$PWD/ros2,dst=$PWD/ros2,readonly" \
+    --mount "type=bind,src=$x11_socket,dst=$x11_socket,readonly" \
+    --workdir "$PWD" go2-rviz:jazzy \
+    bash -c 'source ros2/env.sh && { ros2 launch ros2/rviz/view_go2.launch.py </dev/null & exec python3 -u ros2/sim_playground.py; }'
+
+docker attach --sig-proxy=false go2-rviz
+```
+
+Type each command followed by Enter.
+
+| Input | Result |
+|---|---|
+| `0` | Sit, then Stand Up |
+| `4` | Hello, a paw wave |
+| `7` | Dance |
+| `o` | Toggle a simulated obstacle 0.4 m ahead |
+| `n` | Return to idle by sending the DVS-Gesture `Other` class |
+| `q` | Exit the simulator and close RViz |
+
+For a smoke check, enter `4` with clearance `CLEAR`. The playground should show
+`api_id=1016`, the animator should receive it, and `robot_sim` should reply with
+`code=0 (accepted)`. Wait until the five-second Hello action window has elapsed, then
+enter `o` and wait for `BLOCKED (obstacle)`. Entering `4` now should produce no new
+sport request. Enter `o` again to clear the obstacle.
+
+Press `Ctrl+P`, then `Ctrl+Q` to detach and leave it running. Reattach with the same
+`docker attach` command. After `q`, restart it with `docker start -ai go2-rviz`.
+View startup or renderer logs with `docker logs --tail 50 go2-rviz`.
 
 ## Gotchas we hit
 

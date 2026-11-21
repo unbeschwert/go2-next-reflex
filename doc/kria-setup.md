@@ -2,14 +2,17 @@
 
 Condensed from the RIVER SDK cheatsheet "Get started with Kria".
 
-## How development works
+## C++ development and deployment
 
 1. **Laptop:** edit the ROS 2 C++ code.
-2. **Laptop:** build it inside the supplied Docker container, which cross-compiles for the Kria (see [go2-kria-overview.md](go2-kria-overview.md)).
+2. **Laptop:** cross-compile for the Kria using the Docker builder in `data/go2-kria`. [Build steps](go2-kria-overview.md#docker-build-and-deployment)
 3. **Laptop → Kria:** copy the build over SSH.
 4. **Kria:** start the ROS 2 application.
 5. **Kria → Go2:** the application talks to the robot over an Ethernet cable.
 6. **Go2:** the robot's own controller carries out the commands.
+
+The five-output Python workflow installs the same overlay and copies the tracked
+scripts to `/root/`. [Python bridge setup](gesture-pipeline.md#board-setup-once-per-sd-card)
 
 The Kria has only **one Ethernet port**, so use the supplied **USB-to-Ethernet adapter** for the robot:
 - Kria's built-in port → laptop
@@ -72,7 +75,7 @@ Test it:
 ip -br addr                              # 1. both interfaces have addresses
 ip route get 192.168.123.161             # 2. the route to the Go2 uses the adapter
 ping -I enu1u4c2 -c 4 192.168.123.161    # 3. the robot answers (use your adapter's name)
-ip route get <LAPTOP_IP>                 # 4. the laptop still goes via eth0
+ip route get 192.168.77.2                # 4. the laptop still goes via eth0 (use your laptop's address)
 source /opt/ros/humble/setup.bash        # 5. with CycloneDDS configured (see go2-kria-overview.md):
 ros2 topic list -t
 ```
