@@ -1,6 +1,8 @@
 # Five-class gesture SNN
 
-The classifier predicts `sit`, `lay-down`, `hello`, `dance`, or `no-action` from the local Durance event archive. It uses three Conv–LIF layers and a linear readout over the early and late spike activity. PyTorch fake-quantizes weights, inputs, and membrane updates from the first training batch. This is a PyTorch research checkpoint. RiverOps export and RiverFPGA inference require validation with the Durance SDK.
+The classifier predicts `sit`, `lay-down`, `hello`, `dance`, or `no-action` from the local Durance event archive. It uses three Conv–LIF layers and a linear readout over the early and late spike activity. The default PyTorch run fake-quantizes weights, inputs, and membrane updates from the first training batch. The FP32 option keeps the spiking neurons and uses full-precision arithmetic to study recognition before quantization. RiverOps export and RiverFPGA inference require validation with the Durance SDK.
+
+See [recognition results](RESULTS.md) for the held-out comparisons, the original confusion matrix, and the command rejection tests.
 
 ## Reproduce the run
 
@@ -27,11 +29,63 @@ To test variation in gesture speed and event density, add `--event-augmentation 
 
 On the 555 held-out recordings, the baseline reached 41.6% accuracy and 0.363 macro-F1. The speed and event-density augmentation trial reached 36.2% and 0.314. The baseline also scored higher on validation macro-F1, 0.472 compared with 0.458. These are local PyTorch results.
 
+### Spatial augmentation
+
+The `crop` option adds a small crop, zoom, or pad. The `affine` option also adds up to eight degrees of rotation and a small horizontal shear. Each sample uses one transform across all time bins and both event polarities. These options apply only during training. The four-command model keeps horizontal flips disabled because they would reverse `turn_left` and `turn_right`.
+
+```sh
+python -m training.train --epochs 16 --threads 6 --batch-size 32 --spatial-augmentation crop --output .local/training/spatial-crop
+python -m training.train --epochs 16 --threads 6 --batch-size 32 --spatial-augmentation affine --output .local/training/spatial-affine
+```
+
+With seed 17 and the same 555 test recordings, crop and zoom reached 30.3% accuracy and 0.273 macro-F1. Adding rotation and shear reached 38.9% and 0.312. The baseline scored higher on validation macro-F1, so spatial augmentation remains opt-in.
+
+### Four-class comparison without `dance`
+
+Both runs use `sit`, `lay-down`, `hello`, `no-action` in that order. `drop` omits dance clips from training. `background` keeps the training dance clips and labels them `no-action`. Both select checkpoints on the same 385 non-dance validation clips and report scores on the same 442 non-dance test clips. The 113 held-out dance clips can be replayed separately to check whether the model selects another gesture in response.
+
+```sh
+python -m training.train --epochs 16 --threads 6 --batch-size 32 --dance-policy drop --output .local/training/dance-drop
+python -m training.train --epochs 16 --threads 6 --batch-size 32 --dance-policy background --output .local/training/dance-background
+```
+
+The original checkpoint reached 52.0% accuracy on the same 442 clips. Masking the `dance` score reached 52.3%, dropping the recordings reached 43.7%, and training them as `no-action` reached 49.8%. The background run returned `no-action` on 40 of 113 held-out dance recordings, compared with 3 for the drop run. These are local replay results across the original recording split.
+
 Run one prediction directly from the ZIP. Pass `--checkpoint` when using a different run directory.
 
 ```sh
 python -m training.predict motion_buddy_dataset/13/gesture_04-dance-normal-01.bin
 ```
+
+## Compare model widths before quantization
+
+Both runs keep the same three Conv–LIF layers, event cache, recording-group split, and readout. The compact model uses `8 → 16 → 24` channels (8,645 trainable parameters). The wide model uses `16 → 32 → 48` channels (26,501 parameters). Both train without fake quantization for this comparison.
+
+```sh
+python -m training.train --epochs 16 --threads 6 --batch-size 32 --precision fp32 --model-width compact --output .local/training/fp32-compact
+python -m training.train --epochs 16 --threads 6 --batch-size 32 --precision fp32 --model-width wide --output .local/training/fp32-wide
+```
+
+In this matched run, the compact model reached 0.487 validation macro-F1 and 0.372 test macro-F1. The wide model reached 0.467 and 0.358. On the 555 test clips, widening raised accuracy from 39.8% to 41.8% and reduced false commands on `no-action` clips from 35 to 19. It also reduced correct `hello` predictions from 61 to 51 out of 106.
+
+## Compare ternary event inputs
+
+The baseline keeps the OFF and ON counts in two channels per time bin. The ternary run feeds one channel with `sign(ON - OFF)`, so each bin and cell contains `-1`, `0`, or `+1`. Zero includes empty cells and cells where equal counts cancel. The experiment uses the same time bins, raw event cache, recording groups, and FP32 training schedule as the compact comparison above.
+
+```sh
+python -m training.train --epochs 16 --threads 6 --batch-size 32 --precision fp32 --model-width compact --event-encoding ternary --output .local/training/fp32-ternary
+```
+
+## Compare temporal resolution
+
+The 50 ms experiment keeps the two polarity count channels, spatial resolution, one-second clip, and compact FP32 model. It doubles the number of bins from ten to twenty. The membrane decay per step scales with bin duration so that it retains the same decay over a fixed amount of time.
+
+```sh
+python -m training.data --bin-us 50000 --output .local/training/gestures-50ms.npz
+python -m training.train --epochs 16 --threads 6 --batch-size 32 --precision fp32 --model-width compact --cache .local/training/gestures-50ms.npz --output .local/training/fp32-50ms
+```
+
+On the same 555 test clips, 50 ms bins reached 37.7% accuracy and 0.315 macro-F1. The 100 ms FP32 baseline reached 39.8% and 0.372. Correct `hello` detections fell from 61 to 53 out of 106, and false commands on background fell from 35 to 31 out of 120. The checkpoints were selected on validation macro-F1.
 
 ## Export INT8 weights
 

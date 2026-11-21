@@ -30,6 +30,7 @@ def replay(cache, weights_path, minimum_margin):
     model, weights, metadata = load_export(weights_path)
     with np.load(cache, allow_pickle=False) as data:
         if (tuple(metadata["classes"]) != COMMAND_CLASSES or tuple(data["classes"]) != COMMAND_CLASSES
+                or metadata["ticks_per_step"] != int(data["ticks_per_step"])
                 or metadata["archive_fingerprint"] != str(data["archive_fingerprint"])):
             raise ValueError("Expected matching movement command weights and event cache.")
         selected = data["splits"] == "test"

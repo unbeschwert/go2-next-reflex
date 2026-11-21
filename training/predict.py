@@ -8,7 +8,7 @@ from zipfile import ZipFile
 import torch
 
 from event_data import decode_recording
-from training.data import CLASSES, COMMAND_CLASSES, INPUT_SHAPE, TICKS_PER_STEP, bin_events
+from training.data import MODEL_CLASS_ORDERS, bin_events, input_shape
 from training.export import load_export
 from training.model import GestureSNN
 from training.train import center_event_counts
@@ -25,16 +25,19 @@ def predict(archive, recording, checkpoint_path, *, use_export=False):
 
             model = build_model().eval()
         else:
-            model = GestureSNN(len(checkpoint["classes"])).eval()
+            model = GestureSNN(len(checkpoint["classes"]), width=checkpoint.get("model_width", "compact"),
+                               precision=checkpoint.get("precision", "qat"),
+                               event_encoding=checkpoint.get("event_encoding", "polarity-counts"),
+                               ticks_per_step=checkpoint["ticks_per_step"]).eval()
         model.load_state_dict(checkpoint["state_dict"])
         weights = None
     classes = tuple(checkpoint["classes"])
-    if (classes not in (CLASSES, COMMAND_CLASSES) or tuple(checkpoint["input_shape"]) != INPUT_SHAPE
-            or checkpoint["ticks_per_step"] != TICKS_PER_STEP):
+    ticks_per_step = checkpoint["ticks_per_step"]
+    if classes not in MODEL_CLASS_ORDERS or tuple(checkpoint["input_shape"]) != input_shape(ticks_per_step):
         raise ValueError("The checkpoint uses a different class order or event encoding.")
     with ZipFile(archive) as source:
         events, timestamps = decode_recording(source.read(recording), recording)
-    counts = torch.from_numpy(bin_events(events, timestamps)).to(torch.uint8).unsqueeze(0)
+    counts = torch.from_numpy(bin_events(events, timestamps, ticks_per_step)).to(torch.uint8).unsqueeze(0)
     if checkpoint.get("center_events", False):
         counts = center_event_counts(counts)
     scores = model(counts, weights=weights).softmax(dim=1).squeeze(0)

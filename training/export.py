@@ -7,36 +7,43 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from training.data import CLASSES, COMMAND_CLASSES, INPUT_SHAPE, MAX_COUNT, TICKS_PER_STEP
-from training.model import GestureSNN, LEAK, STATE_SCALE, THRESHOLD, quantized_weight, weight_scales
+from training.data import MAX_COUNT, MODEL_CLASS_ORDERS, input_shape
+from training.model import GestureSNN, STATE_SCALE, THRESHOLD, quantized_weight, weight_scales
 
 
 def export_weights(checkpoint_path, output):
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     if checkpoint.get("backend", "pytorch") != "pytorch":
         raise ValueError("Use training.riverops_commands to export a RiverOps checkpoint.")
+    if checkpoint.get("precision", "qat") != "qat":
+        raise ValueError("The portable INT8 export requires a QAT checkpoint for replay parity.")
     classes = tuple(checkpoint["classes"])
-    if (classes not in (CLASSES, COMMAND_CLASSES) or tuple(checkpoint["input_shape"]) != INPUT_SHAPE
-            or checkpoint["ticks_per_step"] != TICKS_PER_STEP):
+    ticks_per_step = checkpoint["ticks_per_step"]
+    if classes not in MODEL_CLASS_ORDERS or tuple(checkpoint["input_shape"]) != input_shape(ticks_per_step):
         raise ValueError("The checkpoint uses a different class order or event encoding.")
-    model = GestureSNN(len(classes)).eval()
+    model = GestureSNN(len(classes), width=checkpoint.get("model_width", "compact"),
+                       event_encoding=checkpoint.get("event_encoding", "polarity-counts"),
+                       ticks_per_step=ticks_per_step).eval()
     model.load_state_dict(checkpoint["state_dict"])
     layers = [f"conv{i}" for i in range(1, len(model.convolutions) + 1)] + ["classifier"]
     metadata = {
         "format": "gesture-snn-int8-v1",
         "classes": classes,
+        "model_width": checkpoint.get("model_width", "compact"),
+        "event_encoding": model.event_encoding,
         "source": checkpoint.get("source", "recorded"),
-        "input_shape": INPUT_SHAPE,
-        "ticks_per_step": TICKS_PER_STEP,
+        "dance_policy": checkpoint.get("dance_policy", "keep"),
+        "input_shape": input_shape(ticks_per_step),
+        "ticks_per_step": ticks_per_step,
         "max_event_count": MAX_COUNT,
         "center_events": checkpoint.get("center_events", False),
         "layer_order": layers,
         "weight_zero_point": 0,
         "weight_scale_axis": 0,
-        "input_scale": 1.0 / 255,
+        "input_scale": 1.0 if model.event_encoding == "ternary" else 1.0 / 255,
         "state_scale": STATE_SCALE,
         "state_range": [-32768, 32767],
-        "leak": LEAK,
+        "leak": model.leak,
         "threshold": THRESHOLD,
         "checkpoint_epoch": checkpoint["epoch"],
         "archive_fingerprint": checkpoint["archive_fingerprint"],
@@ -67,9 +74,11 @@ def load_export(path):
         metadata = json.loads(str(data["metadata"]))
         if metadata.get("format") != "gesture-snn-int8-v1":
             raise ValueError("Unrecognized gesture SNN export format.")
-        if tuple(metadata["classes"]) not in (CLASSES, COMMAND_CLASSES):
+        if tuple(metadata["classes"]) not in MODEL_CLASS_ORDERS:
             raise ValueError("Unrecognized gesture SNN class order.")
-        model = GestureSNN(len(metadata["classes"])).eval()
+        model = GestureSNN(len(metadata["classes"]), width=metadata.get("model_width", "compact"),
+                           event_encoding=metadata.get("event_encoding", "polarity-counts"),
+                           ticks_per_step=metadata["ticks_per_step"]).eval()
         layers = (*model.convolutions, model.classifier)
         for name, layer in zip(metadata["layer_order"], layers, strict=True):
             codes = torch.from_numpy(data[f"{name}_weight"])
