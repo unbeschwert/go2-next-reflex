@@ -6,8 +6,8 @@ action_bridge, obstacle_detection, profiling_node), plays the role of the FPGA
 SPLEAT server, and fakes the robot's LiDAR so the obstacle check passes.
 
 Usage:
-    source laptop/env.sh
-    python3 laptop/sim_playground.py
+    source ros2/env.sh
+    python3 ros2/sim_playground.py
 
 Then type a command and press Enter:
     0..N-1   perform that gesture for 1.5 s (model output = 1.0 for that class)

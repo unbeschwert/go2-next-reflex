@@ -1,5 +1,5 @@
 # Source on the LAPTOP to talk ROS 2 with the Kria board over the Ethernet cable.
-#   source laptop/env_board_link.sh
+#   source ros2/env_board_link.sh
 # Board side:  ssh root@192.168.77.1  then  source /root/laptop_link.sh   (in bash, kria/laptop_link.sh)
 # Test domain 42, eno1 only, unicast peers = board + laptop. Never reaches a robot.
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"   # Jazzy + local CycloneDDS + workspace

@@ -1,5 +1,5 @@
 # Source on the LAPTOP before building or running the Go2 pipeline locally:
-#   source laptop/env.sh
+#   source ros2/env.sh
 #
 # ROS 2 Jazzy + CycloneDDS packages unpacked without sudo (see doc/gesture-pipeline.md),
 # and all DDS traffic kept on loopback in domain 73, so laptop-only tests can never

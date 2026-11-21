@@ -10,7 +10,7 @@ clearly and stably wins.
     on the Kria (normally via kria/inference.sh):
         python3 /root/live_gesture_bridge.py --host 127.0.0.1 [--require-clear] [--dry-run] [--no-viz]
     on the laptop (talks to the board's SPLEAT server over the cable):
-        source laptop/env.sh
+        source ros2/env.sh
         python3 kria/live_gesture_bridge.py --host 192.168.77.1
 
 The output class order of the provided model is unknown, so each output is mapped

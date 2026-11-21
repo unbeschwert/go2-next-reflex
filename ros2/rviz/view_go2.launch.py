@@ -1,8 +1,8 @@
 """3D view of the Go2 reacting to pipeline commands.
 
-    ./laptop/rviz/fetch_go2_model.sh            # once: downloads the Go2 URDF + meshes
-    source laptop/env.sh                         # local sim   (or laptop/env_board_link.sh for the board)
-    ros2 launch laptop/rviz/view_go2.launch.py
+    ./ros2/rviz/fetch_go2_model.sh            # once: downloads the Go2 URDF + meshes
+    source ros2/env.sh                         # local sim   (or ros2/env_board_link.sh for the board)
+    ros2 launch ros2/rviz/view_go2.launch.py
 """
 import os
 

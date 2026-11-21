@@ -3,7 +3,7 @@
 What is running on our Kria today: the GenX320 event camera feeds the **best model** SNN on the
 SPLEAT FPGA, a small Python bridge turns its outputs into Unitree sport commands, and the **real
 Go2 reacts to gestures**. A 3D Go2 in RViz and a browser view are available for testing without
-the robot. Code: `kria/` (runs on the board), `laptop/` (runs on the laptop).
+the robot. Code: `kria/` (runs on the board), `ros2/` (ROS 2 side, runs on the laptop).
 
 This is a Python alternative to the C++ `gesture_node` + `action_bridge` in `go2-kria`
 ([go2-kria-overview.md](go2-kria-overview.md)): no cross-compiling, and it handles the 5-output
@@ -21,7 +21,7 @@ Kria KV260
   kria/snn_input_viewer.py ─► http://192.168.77.1:8080  (what the SNN sees + output bars)
 
 Laptop (192.168.77.2, cable to the Kria's built-in port)
-  browser view · RViz 3D Go2 (laptop/rviz) · local simulator (laptop/sim_playground.py)
+  browser view · RViz 3D Go2 (ros2/rviz) · local simulator (ros2/sim_playground.py)
 ```
 
 ## Files
@@ -35,10 +35,10 @@ Laptop (192.168.77.2, cable to the Kria's built-in port)
 | `kria/laptop_link.sh` | Kria | ROS 2 env for the laptop link (test domain 42 over `eth0`) |
 | `kria/board_screen_pub.py` | Kria | Publishes the board's X screen as `/kria/camera_view` (optional) |
 | `kria/event_web_viewer.py` | Kria | Raw 320×320 camera in a browser via v4l2. **Needs the camera to itself** - stop inference first |
-| `laptop/env.sh` | Laptop | Jazzy + locally unpacked CycloneDDS, loopback-only domain 73 (simulator) |
-| `laptop/env_board_link.sh` | Laptop | Same, but domain 42 over the cable to the Kria (RViz mirrors the board) |
-| `laptop/sim_playground.py` | Laptop | Fake SPLEAT server + `robot_sim` + real pipeline; type gesture numbers to test the action mapping |
-| `laptop/rviz/` | Laptop | Animated Go2 in RViz driven by `/api/sport/request` (`fetch_go2_model.sh` downloads the URDF once) |
+| `ros2/env.sh` | Laptop | Jazzy + locally unpacked CycloneDDS, loopback-only domain 73 (simulator) |
+| `ros2/env_board_link.sh` | Laptop | Same, but domain 42 over the cable to the Kria (RViz mirrors the board) |
+| `ros2/sim_playground.py` | Laptop | Fake SPLEAT server + `robot_sim` + real pipeline; type gesture numbers to test the action mapping |
+| `ros2/rviz/` | Laptop | Animated Go2 in RViz driven by `/api/sport/request` (`fetch_go2_model.sh` downloads the URDF once) |
 | `models/gesture_snn_example.json` | - | Example River Model Graph (2×80×80 → 5) used to test the firmware generator |
 
 Not in the repo (organiser material): `best_model.json`, `best_model_parameters.txt`
@@ -105,12 +105,12 @@ until each dataset gesture has been checked against the bars.
 ## Test without the robot
 
 - **Board + RViz:** on the board `/root/inference.sh start` (uses `laptop_link.sh`, domain 42),
-  on the laptop `source laptop/env_board_link.sh && ros2 launch laptop/rviz/view_go2.launch.py`.
+  on the laptop `source ros2/env_board_link.sh && ros2 launch ros2/rviz/view_go2.launch.py`.
   Test commands by hand: `ros2 topic pub --once /api/sport/request unitree_api/msg/Request "{header: {identity: {api_id: 1016}}}"`.
-- **Laptop only:** build `go2-kria/src` with colcon on Jazzy, then `python3 laptop/sim_playground.py`.
+- **Laptop only:** build `go2-kria/src` with colcon on Jazzy, then `python3 ros2/sim_playground.py`.
   CycloneDDS was installed without sudo:
   `apt-get download ros-jazzy-cyclonedds ros-jazzy-rmw-cyclonedds-cpp ros-jazzy-rosidl-generator-dds-idl nlohmann-json3-dev ros-jazzy-iceoryx-{binding-c,hoofs,posh}`
-  and `dpkg-deb -x` each into `$GO2_EXTRA` (see `laptop/env.sh`).
+  and `dpkg-deb -x` each into `$GO2_EXTRA` (see `ros2/env.sh`).
 
 The RViz dog is an animation of the commanded trick, not a physics simulation.
 
