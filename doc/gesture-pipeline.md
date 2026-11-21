@@ -106,6 +106,8 @@ until each dataset gesture has been checked against the bars.
 
 - **Board + RViz:** on the board `/root/inference.sh start` (uses `laptop_link.sh`, domain 42),
   on the laptop `source ros2/env_board_link.sh && ros2 launch ros2/rviz/view_go2.launch.py`.
+  `env_board_link.sh` uses the wired port `eno1` by default; if yours has another name
+  (`ip -br link`), set it first: `export KRIA_IFACE=enp3s0`.
   Test commands by hand: `ros2 topic pub --once /api/sport/request unitree_api/msg/Request "{header: {identity: {api_id: 1016}}}"`.
 - **Laptop only:** build `go2-kria/src` with colcon on Jazzy, then `python3 ros2/sim_playground.py`.
   CycloneDDS was installed without sudo:
@@ -122,10 +124,13 @@ The RViz dog is an animation of the commanded trick, not a physics simulation.
 - **Only one program can use the camera**: despot (inference), river-tools capture and
   `event_web_viewer.py` exclude each other. `snn_input_viewer.py` is passive and always fine (it keeps
   port 8080 even after `inference.sh stop`, so `event_web_viewer.py` uses 8081).
-- **Laptop firewall (ufw):** river-tools needs `sudo ufw allow in on eno1 from 192.168.77.0/24 to any port 3333 proto tcp`;
-  ROS 2 to/from the board needs `sudo ufw allow in on eno1 from 192.168.77.0/24`.
+- **Laptop interface name:** the commands below use `$KRIA_IFACE`, the laptop's wired port that the
+  Kria cable is plugged into (`eno1` on our laptop; find yours with `ip -br link`), so run
+  `export KRIA_IFACE=eno1` (or your port's name) first.
+- **Laptop firewall (ufw):** river-tools needs `sudo ufw allow in on $KRIA_IFACE from 192.168.77.0/24 to any port 3333 proto tcp`;
+  ROS 2 to/from the board needs `sudo ufw allow in on $KRIA_IFACE from 192.168.77.0/24`.
 - **Laptop network:** a NetworkManager profile with a static IP is needed
-  (`nmcli con add type ethernet ifname eno1 con-name kria ipv4.method manual ipv4.addresses 192.168.77.2/24`);
+  (`nmcli con add type ethernet ifname $KRIA_IFACE con-name kria ipv4.method manual ipv4.addresses 192.168.77.2/24`);
   after re-plugging the cable run `nmcli con up kria`. `durance-kria.local` does not resolve - use `192.168.77.1`.
 - **Board shell is BusyBox:** no `pkill`, `timeout`, `head -c`. Paste commands one line at a time.
 - Humble (board) ↔ Jazzy (laptop) works for these topics; the "string data is not null-terminated"
