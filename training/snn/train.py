@@ -21,7 +21,7 @@ from riverops.nn import BatchNorm2d, Conv2d, prepare_ptq, prepare_qat
 from .augment import augment as augment_counts
 from .config import Config
 from .model import build_model
-from .quant import Formats, apply_layer_scales, choose_formats, layer_scales
+from .quant import Formats, apply_layer_scales, choose_formats, describe_layers, layer_scales
 
 
 def pick_device(name: str) -> torch.device:
@@ -250,7 +250,8 @@ def quantize(model, cfg: Config, splits: dict, run_dir: Path, history: list) -> 
     scales, scale_info = layer_scales(model, formats, cfg)
     apply_layer_scales(model, scales, cfg.model.neuron.v_threshold)
     model.to(device)
-    print(f"formats: {formats.describe()}  ({format_info})", flush=True)
+    print(f"formats: {formats.describe()}  ({ {k: v for k, v in format_info.items() if k != 'layers'} })", flush=True)
+    print(describe_layers(format_info["layers"]), flush=True)
     print(f"per-layer scale k (weights, bias, threshold / k): {scales}  "
           f"{[(s['need'], s['fits']) for s in scale_info]}", flush=True)
 

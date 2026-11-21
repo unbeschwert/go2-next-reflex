@@ -198,6 +198,7 @@ class QuantConfig:
     # k, together with its threshold (same spikes, wider range, coarser steps for that layer only).
     layer_scaling: bool = False
     max_layer_scale: int = 16
+    layer_scale_biases: bool = True    # size each layer for its biases too (False: biases may clip; QAT adapts)
 
 
 @dataclass
