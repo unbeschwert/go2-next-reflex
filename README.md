@@ -17,9 +17,9 @@ Build a new event-vision behavior for a **Unitree Go2 X**:
 Event camera ──► Data recording ──► SNN training ──► Kria KV260 inference ──► ROS 2 ──► Unitree Go2 X
 ```
 
-## Repository structure
+## Event-camera labeling demo
 
-_To be defined as the project evolves._
+Use [the CVAT demo](labeling/README.md) to turn three clips from the local Durance gesture archive into labeling tasks. The `hello` clip includes a starter palm track. The other two clips are ready for annotation.
 
 ## Team
 
