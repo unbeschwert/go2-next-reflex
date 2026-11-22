@@ -1,6 +1,8 @@
 # Firmware performance testing
 
-Compares SPLEAT firmware builds of **the same network** on the Kria KV260. It measures FPGA latency per frame and board power, and checks that every build gives bit-identical outputs. It was written to compare the three **implementation strategies** of the riversdk.dev firmware generator ("Better latency", "Less resources", "Faster generation"). It works for any set of builds of one network, for example different Q formats as long as the weights match them.
+This benchmark checks the inference stage of the Go2 gesture reflex. It replays recorded gesture clips on the Kria KV260 and checks whether a firmware build changes the output spikes that the ROS 2 bridge uses to decide how the robot should respond. Keeping the trained network fixed lets us measure the effect of each build on inference latency and board power. See the [gesture pipeline](../doc/gesture-pipeline.md) for the live camera and robot path.
+
+The first comparison covers three riversdk.dev build strategies for the deployed 40×40 gesture network. Use the same network, exported weights, server and camera configuration, and class map for every build you compare.
 
 ## Result: nb40, three strategies (2026-11-22)
 
@@ -20,15 +22,15 @@ Same network (`models/optimised_snn/nb40_model.json`, 40×40 input), same form o
 
 ¹ The first try (#41) failed after 30 s at stage "Design hardware" with no log; the identical resubmission built fine.
 
-**Conclusion: keep Faster generation.** For nb40 the strategy changes nothing that matters:
+**Keep Faster generation as the default for nb40.** It built fastest, and the three builds produced the same outputs and nearly the same inference latency.
 
 - **Better latency and Less resources produce the same hardware.** Their bitstreams differ only in the 3-byte build time in the file header. Faster generation is a different place-and-route: 1.36 MB of the 7.8 MB bitstream differ.
-- **Same clock, same overlay.** All three `.dtbo` files are byte-identical (fabric clock 100 MHz). Without a faster clock, a "latency" layout gains nothing, and the measured latency is identical.
+- **Same clock, same overlay.** All three `.dtbo` files are byte-identical (fabric clock 100 MHz). The median per-frame latency was 0.184 ms for each build.
 - **Same results.** Every output spike of every frame matched in all 9 runs.
-- **Power:** Faster generation draws 5 mW less idle and 7 mW less during the replay. That is about three times the gap between the two identical designs (#40 vs #42: 1–2.5 mW), so it is probably real, but it is 0.2 % of the board's power.
+- **Power:** The recorded idle and replay means differ by less than 0.01 W across the three builds. Each mean covers three rounds.
 - Builds are reproducible: two Faster generation builds of the same model (#28, #32) differ only in the build time stamp.
 
-The strategy would matter for a larger network that does not fit or does not meet timing with Faster generation.
+Rerun the comparison for a larger network before choosing its build strategy.
 
 Test data: 65 clips from sessions 22, 29, 30, 33 (`go2_gestures_s20-33.zip`), 40 empty frames + 100 frames per clip = 9,100 frames per measurement, 3 rounds per build. The accuracy was 100 % for all builds. These weights were trained on all people including these sessions, so that number is only a consistency check, not a generalisation score. Raw data: [results/2026-11-22_nb40_strategies/](results/2026-11-22_nb40_strategies/) (`builds.json` = jobs and checksums, `results.json` = every measurement, `measurements/` = per-frame outputs and latency (`.npz`) and the replay log of every measurement).
 
@@ -51,15 +53,15 @@ laptop: fpga_eval.py ──TCP :3333, one frame at a time──► spleat-server
 board power sensor (INA260) ── read every 50 ms over ssh ──► laptop
 ```
 
-1. **Only the firmware differs.** `--firmware NAME=DIR` creates `/root/setups/NAME` as a copy of `--base-setup` (default `nb40_own4`) with `spleat.bit.bin` and `spleat.dtbo` from the laptop folder `DIR`. Checksums are compared after the copy.
+1. **Preflight.** The benchmark validates the requested replay clips and checks that every setup uses the same weights, server config, camera config, and class map. `--firmware NAME=DIR` stages `spleat.bit.bin` and `spleat.dtbo` from the laptop with the other files from `--base-setup` (default `nb40_own4`). The files are verified before the candidate setup is installed. Use a separate name for each staged build.
 2. **One measurement** (about 38 s):
-   - `switch_setup.sh NAME` stops the camera and bridge, copies the files into place, reprograms the FPGA (`xmutil loadapp spleat`) and restarts the server. The test only continues if it reports `server active | app 1`.
+   - `switch_setup.sh NAME` stops the camera and bridge, copies the files into place, reprograms the FPGA (`xmutil loadapp spleat`) and restarts the server. The test only continues once the SPLEAT app and server are active and the installed files match the expected checksums.
    - Records the checksums of the loaded firmware and weights, the fabric clock (`pl0_ref` in the clock tree), the chip temperatures and the fan.
    - 15 s of idle board power (FPGA loaded, no frames).
    - Replays the clips with `fpga_eval.py` (block sums, as the camera client sends them) while sampling power. The server returns the output spikes and the FPGA latency for every frame.
 3. **Rounds alternate the order** (A B C, C B A, A B C), so slow drift such as warm-up affects every build equally.
-4. **Comparison:** latency over all frames of all rounds; power as the mean per measurement, averaged over the rounds; outputs compared value by value with the first run of the first setup.
-5. **Restore:** the board always goes back to `--restore-setup` and `inference.sh start`, also after an error. The camera client sometimes dies at start-up after FPGA reloads (`Error TimeHigh discrepancy` in `/tmp/despot.log`, 0 frames/s), so the test checks the camera frame rate and starts once more if needed.
+4. **Comparison:** latency over all frames of all rounds; power as the mean per measurement, averaged over the rounds; outputs compared byte for byte with the first run of the first setup after checking clip labels and session order.
+5. **Restore.** Once measurements begin, the benchmark attempts to reload `--restore-setup` and run `inference.sh start`, including after errors. It checks the camera frame rate, retries camera start once, and reports a restoration failure. Use `--restore-mode "start --headless"` for a headless board or `--restore-mode none` to leave camera inference stopped.
 
 ## Running it
 
@@ -89,7 +91,7 @@ diff <(python3 firmware_performance_testing/dtbo_dump.py A/spleat.dtbo --all) \
 scp firmware_performance_testing/switch_setup.sh root@192.168.77.1:/root/
 ```
 
-**4. Dry run, then the test** (from the repo root; options the script does not know go to `fpga_eval.py`):
+**4. Dry run, then the test.** Run from the repository root. The dry run validates the dataset and reads checksums over SSH without changing the board. Replay options such as `--zip` and `--size` go to `fpga_eval.py`.
 
 ```bash
 python3 firmware_performance_testing/firmware_bench.py --dry-run \
