@@ -31,7 +31,7 @@ CLASS_NAMES = ("Sit", "Lay down", "Hello", "Dance", "No action")
 EV = np.dtype([("x", ">u2"), ("y", ">u2"), ("polarity", "u1"), ("timestamp", ">i8")])
 CAM, T = 320, 100
 
-ap = argparse.ArgumentParser()
+ap = argparse.ArgumentParser(allow_abbrev=False)
 ap.add_argument("--host", default="192.168.77.1")
 ap.add_argument("--port", type=int, default=3333)
 ap.add_argument("--zip", default=os.path.expanduser("~/Downloads/durance-ai-handgesture-recognition (1).zip"))
@@ -47,6 +47,8 @@ ap.add_argument("--input-scale", type=float, default=0.0,
 ap.add_argument("--save", default="", help="write per-frame outputs to this .npz")
 ap.add_argument("--timeout", type=float, default=5.0)
 ap.add_argument("--selftest", action="store_true")
+ap.add_argument("--check-data", action="store_true",
+                help="validate the requested recordings without connecting to the board")
 ap.add_argument("--class-names", default=",".join(CLASS_NAMES),
                 help="comma list, one per output, last = no gesture; our gestures: "
                      "'Heart,Turn left,Turn right,Namaskaram,No action'")
@@ -59,7 +61,12 @@ ap.add_argument("--silent-thr", type=float, default=0.0,
                      "fires in more than 40 %% of the frames")
 args = ap.parse_args()
 CLASS_NAMES = tuple(args.class_names.split(","))
-assert len(CLASS_NAMES) == args.outputs, "one class name per output"
+if args.outputs <= 0 or len(CLASS_NAMES) != args.outputs:
+    ap.error("provide one class name per output")
+if args.size <= 0 or CAM % args.size:
+    ap.error(f"--size must be a positive divisor of the {CAM}-pixel sensor width")
+if args.gap < 0 or args.limit < 0 or args.timeout <= 0:
+    ap.error("--gap and --limit must be nonnegative and --timeout must be positive")
 S = args.size
 SCALE = CAM // S
 if not args.input_scale:
@@ -162,6 +169,9 @@ def load_clips():
             if m and not m.group(2).startswith(".") and m.group(1) in sessions:
                 cls = len(CLASS_NAMES) - 1 if args.as_none else int(m.group(3)) - 1
                 per.setdefault((m.group(1), cls), []).append(n)
+        missing = set(sessions) - {session for session, _ in per}
+        if missing:
+            raise ValueError(f"no clips for session(s) {', '.join(sorted(missing))} in {args.zip}")
         items = []
         for (sess, cls), names in sorted(per.items()):
             if args.limit:
@@ -170,6 +180,10 @@ def load_clips():
         clips = []
         for name, cls, sess in items:
             data = zf.read(name)
+            if len(data) <= 4 or (len(data) - 4) % EV.itemsize or int.from_bytes(data[:4], "big") != len(data) - 4:
+                raise ValueError(f"invalid recording length: {name}")
+            if not 0 <= cls < len(CLASS_NAMES):
+                raise ValueError(f"recording label is outside the configured class range: {name}")
             ev = np.frombuffer(data, EV, offset=4)
             t = (ev["timestamp"].astype(np.int64) - int(ev["timestamp"][0])) // 10_000
             ok = (t >= 0) & (t < T) & (ev["x"] < CAM) & (ev["y"] < CAM) & (ev["polarity"] < 2)
@@ -181,6 +195,13 @@ def load_clips():
 
 
 def main():
+    if args.check_data:
+        try:
+            clips = load_clips()
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            ap.error(str(exc))
+        print(f"{len(clips)} clips validated from {args.zip}")
+        return
     if args.selftest:
         args.host, args.port = "127.0.0.1", 39333
         threading.Thread(target=fake_server, args=(args.port, args.outputs), daemon=True).start()
