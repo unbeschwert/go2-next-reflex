@@ -1,5 +1,7 @@
 # SNN training pipeline
 
+The [REACT-style Motion Buddy prototype](react/README.md) has its own raw-event training command and a plan for the Kria port.
+
 Train a spiking neural network on event-camera clips on the team GPU server. Quantize it to the
 formats the Kria KV260's SPLEAT firmware uses, check it fits the FPGA's on-chip memory, and get
 every file the board needs. One YAML config drives all of it.
