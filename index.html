@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="How Wacky Wavers built and tested an event-camera gesture reflex for the Go2 X at the Berlin Robotics Hackathon.">
+  <meta name="theme-color" content="#17191f">
+  <title>Wacky Wavers | A reflex for the Go2 X</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="wordmark" href="#main"><span>WACKY</span> WAVERS</a>
+      <nav aria-label="Page sections">
+        <a href="#pipeline">Pipeline</a>
+        <a href="#clips">Clips</a>
+        <a href="#inference">Inference check</a>
+        <a href="#results">FPGA results</a>
+        <a href="#demo-media">Demo media</a>
+        <a href="#team">Team</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="shell hero-inner">
+        <div class="hero-copy">
+          <p class="eyebrow">Berlin Robotics &amp; AI Hackathon</p>
+          <h1 id="hero-title">A reflex for <br>the <em>Go2 X.</em></h1>
+          <p class="hero-intro">An event camera sees the gesture. A spiking network on the Kria classifies it. The Go2 responds through ROS 2.</p>
+          <a class="button button-primary" href="#pipeline">Explore the pipeline</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="pipeline" id="pipeline" aria-labelledby="pipeline-title">
+      <div class="shell section-shell">
+        <div class="section-heading">
+          <div>
+            <h2 id="pipeline-title">From recording to robot</h2>
+            <p>How we built on the organizers’ Motion Buddy and RIVER SDK examples.</p>
+          </div>
+          <button class="button button-outline" id="present" type="button" hidden>Present pipeline</button>
+        </div>
+
+        <div class="stage-tabs" role="tablist" aria-label="Pipeline stages">
+          <button id="tab-capture" type="button" role="tab" aria-selected="true" aria-controls="stage-capture">Capture</button>
+          <button id="tab-prepare" type="button" role="tab" aria-selected="false" aria-controls="stage-prepare" tabindex="-1">Prepare</button>
+          <button id="tab-train" type="button" role="tab" aria-selected="false" aria-controls="stage-train" tabindex="-1">Train</button>
+          <button id="tab-quantize" type="button" role="tab" aria-selected="false" aria-controls="stage-quantize" tabindex="-1">Quantize</button>
+          <button id="tab-deploy" type="button" role="tab" aria-selected="false" aria-controls="stage-deploy" tabindex="-1">Deploy</button>
+        </div>
+
+        <div class="stage-content">
+          <section class="stage-panel" id="stage-capture" role="tabpanel" aria-labelledby="tab-capture" tabindex="0">
+            <h3>Cued recording and automatic labels</h3>
+            <div class="comparison">
+              <div><h4>Organizers’ example</h4><p>Motion Buddy supplied labeled clips. The RIVER capture tool recorded new samples with manual start and stop.</p></div>
+              <div><h4>Wacky Wavers</h4><p>Recorded <strong>2,442 clips from 11 people</strong> for heart, left turn, right turn and natural no-action motion. Recording cues assigned the labels.</p></div>
+            </div>
+            <p class="stage-note">We reserved people for validation and test so the model was evaluated on unfamiliar performers. <a href="#clips">Watch sample recordings</a>.</p>
+          </section>
+
+          <section class="stage-panel" id="stage-prepare" role="tabpanel" aria-labelledby="tab-prepare" tabindex="0" hidden>
+            <h3>40×40 input with consistent turn labels</h3>
+            <div class="comparison">
+              <div><h4>Organizers’ example</h4><p>The notebook averaged ON and OFF events into a 32×32 grid and used random shifts of up to two pixels during training.</p></div>
+              <div><h4>Wacky Wavers</h4><p>Cut takes into one-second clips, filtered low-quality windows, and prepared 40×40 inputs. Mirroring swapped the left and right turn labels.</p></div>
+            </div>
+            <p class="stage-note">The 40×40 grid matches the board’s downsampling by eight. Mirroring preserved the meaning of each turn.</p>
+          </section>
+
+          <section class="stage-panel" id="stage-train" role="tabpanel" aria-labelledby="tab-train" tabindex="0" hidden>
+            <h3>Training for a continuous stream</h3>
+            <div class="comparison">
+              <div><h4>Organizers’ example</h4><p>A five-layer spiking CNN trained for ten epochs and scored one-second clips by counting output spikes.</p></div>
+              <div><h4>Wacky Wavers</h4><p>Selected the board-compatible nb40 SNN, added 40 warm-up frames before scoring each training clip, and penalized excess spiking.</p></div>
+            </div>
+            <p class="stage-note">The 40 context frames let neuron state build before scoring. Quiet-scene examples discouraged idle firing, and the spike penalty cut synaptic operations from 1.75 million to 59,000 per 10 ms step.</p>
+          </section>
+
+          <section class="stage-panel" id="stage-quantize" role="tabpanel" aria-labelledby="tab-quantize" tabindex="0" hidden>
+            <h3>8-bit training matched to firmware</h3>
+            <div class="comparison">
+              <div><h4>Organizers’ example</h4><p>The notebook exported a model graph and parameters in an 8-bit Q1.7 weight format.</p></div>
+              <div><h4>Wacky Wavers</h4><p>Used quantization-aware training with the nb40 firmware’s Q2.6 weights and biases, then exported the board’s integer weights.</p></div>
+            </div>
+            <p class="stage-note">Training applied the board’s 8-bit quantization throughout learning. The firmware reads the exported weight integers divided by 64.</p>
+          </section>
+
+          <section class="stage-panel" id="stage-deploy" role="tabpanel" aria-labelledby="tab-deploy" tabindex="0" hidden>
+            <h3>Matching the board to the training input</h3>
+            <div class="comparison">
+              <div><h4>Organizers’ example</h4><p>Generate Kria firmware from the model graph and load it with matching weights and camera settings.</p></div>
+              <div><h4>Wacky Wavers</h4><p>Matched the 40×40 bitstream and the camera scaling, replayed held-out clips through the FPGA, and mapped the outputs to ROS 2 commands.</p></div>
+            </div>
+            <p class="stage-note">The Go2 responds with a finger heart or a closed-loop turn. The idle output leaves it stationary. <a href="#inference">See how we checked board inference</a>.</p>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section class="clips" id="clips" aria-labelledby="clips-title">
+      <div class="shell section-shell">
+        <div class="section-heading clips-heading">
+          <div>
+            <h2 id="clips-title">Event-camera clips</h2>
+            <p>One-second recordings from the team’s Session 20 dataset.</p>
+          </div>
+          <ul class="polarity-key" aria-label="Event colors">
+            <li><span class="polarity-dot polarity-on" aria-hidden="true"></span>Brighter (ON)</li>
+            <li><span class="polarity-dot polarity-off" aria-hidden="true"></span>Darker (OFF)</li>
+            <li><span class="polarity-dot polarity-both" aria-hidden="true"></span>Both</li>
+          </ul>
+        </div>
+
+        <div class="clip-grid">
+          <figure>
+            <video controls muted loop playsinline preload="auto" poster="assets/clips/turn-left.png" aria-labelledby="clip-left-label" data-recording="gesture_02-turn-left-360-normal-09.bin">
+              <source src="assets/clips/turn-left.mp4" type="video/mp4">
+              <a href="assets/clips/turn-left.mp4">Open left turn recording</a>
+            </video>
+            <figcaption id="clip-left-label">Turn left</figcaption>
+          </figure>
+          <figure>
+            <video controls muted loop playsinline preload="auto" poster="assets/clips/turn-right.png" aria-labelledby="clip-right-label" data-recording="gesture_03-turn-right-360-normal-04.bin">
+              <source src="assets/clips/turn-right.mp4" type="video/mp4">
+              <a href="assets/clips/turn-right.mp4">Open right turn recording</a>
+            </video>
+            <figcaption id="clip-right-label">Turn right</figcaption>
+          </figure>
+          <figure>
+            <video controls muted loop playsinline preload="auto" poster="assets/clips/no-action.png" aria-labelledby="clip-none-label" data-recording="gesture_05-no-action-normal-04.bin">
+              <source src="assets/clips/no-action.mp4" type="video/mp4">
+              <a href="assets/clips/no-action.mp4">Open no-action recording</a>
+            </video>
+            <figcaption id="clip-none-label">No action</figcaption>
+          </figure>
+        </div>
+        <p class="clips-note">Press play on a clip to loop it. Each preview frame shows 50 ms of activity on the 320×320 sensor. <a href="#heart">See the heart gesture</a>.</p>
+      </div>
+    </section>
+
+    <section class="inference" id="inference" aria-labelledby="inference-title">
+      <div class="shell section-shell">
+        <div class="section-heading">
+          <div>
+            <h2 id="inference-title">PyTorch vs. board inference</h2>
+            <p>We replayed recorded 10 ms event frames through a fixed-point PyTorch simulation and the Kria KV260 using <code>FPGAClient</code>.</p>
+          </div>
+        </div>
+        <div class="inference-checks">
+          <div>
+            <h3>Board state carried over</h3>
+            <p class="inference-value">74.0%</p>
+            <p>matching frame-level spike outputs<br><strong>9 of 10</strong> clip predictions matched</p>
+          </div>
+          <div>
+            <h3>Both started from zero</h3>
+            <p class="inference-value">86.0%</p>
+            <p>matching frame-level spike outputs<br><strong>10 of 10</strong> clip predictions matched</p>
+          </div>
+        </div>
+        <p class="inference-note">Two 10-clip Motion Buddy diagnostics. Spike agreement counts matching 0/1 outputs for each frame and class.</p>
+        <div class="comparison inference-explanation">
+          <div><h4>Starting state</h4><p>Neurons carry charge from earlier frames. On the board, that state persisted across clips and TCP reconnects, so the same input could produce a different spike pattern. Restarting SPLEAT before each clip gave both sides a zero start.</p></div>
+          <div><h4>Rounding</h4><p>Near the firing threshold, one fixed-point step can move a spike to the next frame. We observed a one-frame delay in a separate replay. A shift within a clip can change frame agreement while leaving the winning spike total unchanged.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="results" id="results" aria-labelledby="results-title">
+      <div class="shell section-shell">
+        <div class="section-heading">
+          <div><h2 id="results-title">Measured on the Kria</h2><p>FPGA replay of 360 clips from two held-out performers.</p></div>
+        </div>
+        <dl class="scoreline">
+          <div><dt>Clip classification</dt><dd>99.2%</dd></div>
+          <div><dt>Correct gesture triggers</dt><dd>98.3%</dd></div>
+          <div><dt>False triggers on no-action clips</dt><dd>1.4%</dd></div>
+          <div><dt>Median FPGA time per frame</dt><dd>0.15 <small>ms</small></dd></div>
+        </dl>
+
+        <p class="motion-buddy-result"><strong>Original vs. updated Motion Buddy model.</strong> The report lists <strong>60.5%</strong> for the original FPGA model. The updated model reached <strong>79.7%</strong> on the validation session and <strong>75.9%</strong> across three held-out test sessions.</p>
+
+        <figure class="benchmark" aria-labelledby="benchmark-title">
+          <div class="benchmark-intro">
+            <h3 id="benchmark-title">Model improvement tests</h3>
+            <div class="benchmark-controls" role="group" aria-label="Select a model experiment">
+              <button type="button" data-benchmark="latency" aria-pressed="true" aria-controls="latency-benchmark">Spike penalty</button>
+              <button type="button" data-benchmark="scaling" aria-pressed="false" aria-controls="scaling-benchmark">Input scaling</button>
+              <button type="button" data-benchmark="quantization" aria-pressed="false" aria-controls="quantization-benchmark">8-bit training</button>
+            </div>
+          </div>
+          <div class="benchmark-panel" id="latency-benchmark">
+            <p class="benchmark-unit">Median FPGA processing time per frame</p>
+            <div class="bar-row"><span>Without spike penalty</span><div class="bar-track" aria-hidden="true"><div class="bar" style="--value: 92.5%"></div></div><strong>0.74 ms</strong></div>
+            <div class="bar-row"><span>With spike penalty</span><div class="bar-track" aria-hidden="true"><div class="bar bar-accent" style="--value: 18.75%"></div></div><strong>0.15 ms</strong></div>
+            <p class="benchmark-note">Fewer spikes meant fewer synaptic operations per frame. Gesture-to-motion latency still needs a live measurement.</p>
+          </div>
+          <div class="benchmark-panel" id="scaling-benchmark" hidden>
+            <p class="benchmark-unit">Classification accuracy in a separate 40×40 FPGA replay check</p>
+            <div class="bar-row"><span>Shipped scaling</span><div class="bar-track" aria-hidden="true"><div class="bar" style="--value: 37.5%"></div></div><strong>37.5%</strong></div>
+            <div class="bar-row"><span>Matched scaling</span><div class="bar-track" aria-hidden="true"><div class="bar bar-accent" style="--value: 99.4%"></div></div><strong>99.4%</strong></div>
+            <p class="benchmark-note">The camera sent block sums. Matching those sums to the means used in training restored accuracy.</p>
+          </div>
+          <div class="benchmark-panel" id="quantization-benchmark" hidden>
+            <p class="benchmark-unit">8-bit test accuracy in a Motion Buddy software experiment from the team report</p>
+            <div class="bar-row"><span>Rounded after training</span><div class="bar-track" aria-hidden="true"><div class="bar" style="--value: 61%"></div></div><strong>61%</strong></div>
+            <div class="bar-row"><span>Quantization-aware training</span><div class="bar-track" aria-hidden="true"><div class="bar bar-accent" style="--value: 81%"></div></div><strong>81%</strong></div>
+            <p class="benchmark-note">Quantization-aware training applied the 8-bit rounding during learning.</p>
+          </div>
+        </figure>
+      </div>
+    </section>
+
+    <section class="demo-media" id="demo-media" aria-labelledby="demo-media-title">
+      <div class="shell section-shell">
+        <div class="section-heading">
+          <div>
+            <h2 id="demo-media-title">Simulation and recording</h2>
+            <p>See the recorded camera input, the simulator’s output spikes, and the Go2 view in RViz.</p>
+          </div>
+        </div>
+        <div class="demo-media-grid">
+          <figure>
+            <video controls playsinline preload="metadata" poster="assets/demo/fpga-simulation-replay.png" aria-labelledby="replay-label">
+              <source src="assets/demo/fpga-simulation-replay.mp4" type="video/mp4">
+              <a href="assets/demo/fpga-simulation-replay.mp4">Open the FPGA simulator replay</a>
+            </video>
+            <figcaption id="replay-label"><strong>FPGA simulator replay</strong><span>A recorded heart gesture with the model’s output spikes and predicted class.</span></figcaption>
+          </figure>
+          <figure>
+            <video controls playsinline preload="metadata" poster="assets/demo/cued-gesture-capture.png" aria-labelledby="capture-label">
+              <source src="assets/demo/cued-gesture-capture.mp4" type="video/mp4">
+              <a href="assets/demo/cued-gesture-capture.mp4">Open the cued recording clip</a>
+            </video>
+            <figcaption id="capture-label"><strong>Cued event-camera recording</strong><span>The on-screen cue supplies the label for the left-turn take.</span></figcaption>
+          </figure>
+          <figure>
+            <img src="assets/demo/rviz-go2.jpeg" width="1600" height="900" loading="lazy" alt="The simulated Go2 standing in RViz with gesture scores displayed above it.">
+            <figcaption><strong>Go2 in RViz</strong><span>The simulated robot with gesture scores and its current action state.</span></figcaption>
+          </figure>
+        </div>
+
+        <h3 class="demo-subheading">Go2 hardware demo</h3>
+        <div class="demo-media-grid">
+          <figure>
+            <video controls playsinline preload="none" poster="assets/demo/follow-me.png" aria-labelledby="follow-me-label">
+              <source src="assets/demo/follow-me.mp4" type="video/mp4">
+              <a href="assets/demo/follow-me.mp4">Open the Follow Me clip</a>
+            </video>
+            <figcaption id="follow-me-label"><strong>Follow Me</strong></figcaption>
+          </figure>
+          <figure>
+            <video controls playsinline preload="none" poster="assets/demo/wide-turn.png" aria-labelledby="wide-turn-label">
+              <source src="assets/demo/wide-turn.mp4" type="video/mp4">
+              <a href="assets/demo/wide-turn.mp4">Open the turning clip</a>
+            </video>
+            <figcaption id="wide-turn-label"><strong>Turning with people nearby</strong></figcaption>
+          </figure>
+          <figure>
+            <video controls playsinline preload="none" poster="assets/demo/robot-heart.png" aria-labelledby="robot-heart-label">
+              <source src="assets/demo/robot-heart.mp4" type="video/mp4">
+              <a href="assets/demo/robot-heart.mp4">Open the robot’s heart gesture clip</a>
+            </video>
+            <figcaption id="robot-heart-label"><strong>Heart gesture</strong></figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="heart-finale" id="heart" aria-labelledby="heart-title">
+      <div class="shell section-shell heart-layout">
+        <div class="section-heading">
+          <div>
+            <h2 id="heart-title">Heart gesture</h2>
+            <p>The event-camera cue for the Go2’s finger-heart response.</p>
+          </div>
+        </div>
+        <figure class="heart-clip">
+          <div class="heart-frame">
+            <picture>
+              <source media="(prefers-reduced-motion: reduce)" srcset="assets/clips/heart.png">
+              <img src="assets/clips/heart.gif" width="320" height="320" loading="lazy" alt="Event-camera recording of a performer forming a heart overhead with both arms.">
+            </picture>
+            <button type="button" class="clip-toggle" id="heart-motion" hidden>Pause</button>
+          </div>
+          <figcaption>Session 20 event-camera recording</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="team" id="team" aria-labelledby="team-title">
+      <div class="shell section-shell">
+        <div class="section-heading">
+          <div>
+            <h2 id="team-title">Meet Wacky Wavers</h2>
+            <p>Durance AI Track at the Berlin Robotics &amp; AI Hackathon</p>
+          </div>
+        </div>
+        <ul class="team-members">
+          <li>Nirmal Kumar Ramadoss</li>
+          <li>Bhanuteja Vadlamudi</li>
+          <li>Cherian Grundmann</li>
+          <li>Grigorii Vydrevich</li>
+          <li>Ritayan Dhara</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      <p class="wordmark"><span>WACKY</span> WAVERS</p>
+      <nav aria-label="Project sources">
+        <a href="https://github.com/unbeschwert/go2-next-reflex/blob/af24e87/doc/training-snn.md">Reference notebook notes</a>
+        <a href="https://github.com/unbeschwert/go2-next-reflex/blob/c3fa533/training/optimised_snn/README.md">FPGA replay results</a>
+        <a href="https://github.com/unbeschwert/go2-next-reflex/blob/af24e87/doc/deploy-model.md">Deployment notes</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>
