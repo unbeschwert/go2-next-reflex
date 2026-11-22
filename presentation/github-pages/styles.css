@@ -1,3 +1,11 @@
+@font-face {
+  font-family: Roboto;
+  src: url('assets/fonts/roboto.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 :root {
   color-scheme: dark;
   --ink: #17191f;
@@ -8,7 +16,7 @@
   --yellow: #ffdf32;
   --dark-line: #41444a;
   --light-line: #cbc7b9;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: Roboto, Arial, Helvetica, sans-serif;
   scroll-behavior: smooth;
 }
 
