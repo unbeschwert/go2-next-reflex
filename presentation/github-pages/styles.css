@@ -42,7 +42,7 @@ p { line-height: 1.55; }
 .header-inner nav a, .footer-inner nav a { color: var(--muted); font-size: .9375rem; text-underline-offset: 4px; text-decoration: none; }
 .header-inner nav a:hover, .footer-inner nav a:hover { color: var(--paper); text-decoration: underline; }
 
-.hero { background: #13151a url('assets/berlin-go2.png') center 46% / cover no-repeat; }
+.hero { background: #13151a url('assets/berlin-go2-camera.png') center 46% / cover no-repeat; }
 .hero-inner { min-height: clamp(520px, 44vw, 700px); display: flex; align-items: center; }
 .hero-copy { max-width: 44%; padding-block: 56px; }
 .eyebrow { color: var(--lime); font-weight: 700; text-transform: uppercase; letter-spacing: .12em; font-size: .875rem; }
@@ -152,7 +152,7 @@ h1 em { font-style: normal; color: var(--yellow); }
   .shell { width: calc(100% - 40px); }
   .header-inner { min-height: 60px; gap: 12px; }
   .header-inner nav { gap: 14px; }
-  .hero { background: #13151a url('assets/berlin-go2.png') 92% top / auto 295px no-repeat; }
+  .hero { background-position: 92% top; background-size: auto 295px; }
   .hero-inner { min-height: 0; align-items: start; padding-top: 280px; }
   .hero-copy { max-width: none; padding-top: 0; padding-bottom: 40px; }
   h1 { font-size: clamp(3.4rem, 12vw, 4.85rem); }
