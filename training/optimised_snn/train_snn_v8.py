@@ -59,6 +59,11 @@ from torch.optim.swa_utils import AveragedModel
 
 from riverops.nn import FixedPointFormat, QuantConfig, SpikingConvBN2d, prepare_ptq, prepare_qat
 
+if __package__:
+    from .dataset.layout import archive_people, check_person_splits, session_ids
+else:
+    from dataset.layout import archive_people, check_person_splits, session_ids
+
 EV = np.dtype([("x", ">u2"), ("y", ">u2"), ("polarity", "u1"), ("timestamp", ">i8")])
 CAM = 320
 ARCHS = {  # input size, [(in, out, kernel, stride, padding), ...]
@@ -240,11 +245,24 @@ def load_split(members, sessions, pool, force_label=None, limit=0, sess_offset=0
     return X, torch.tensor(L), torch.tensor(Y), torch.tensor(S)
 
 
-with zipfile.ZipFile(args.zip) as zf:
-    members = list_members(zf)
-sessions = list(members)
-val_s, test_s = args.val.split(","), args.test.split(",")
-train_s = [s for s in sessions if s not in val_s + test_s] if args.train == "auto" else args.train.split(",")
+try:
+    with zipfile.ZipFile(args.zip) as zf:
+        members = list_members(zf)
+        people = archive_people(zf)
+    sessions = list(members)
+    val_s, test_s = session_ids(args.val), session_ids(args.test)
+    train_s = [s for s in sessions if s not in val_s + test_s] if args.train == "auto" else session_ids(args.train)
+    splits = {"train": train_s, "val": val_s, "test": test_s}
+    selected = train_s + val_s + test_s
+    if not train_s:
+        raise ValueError("no training sessions remain")
+    if missing := sorted(set(selected) - set(sessions)):
+        raise ValueError(f"sessions not in the training archive: {missing}")
+    if len(selected) != len(set(selected)):
+        raise ValueError("a session appears in multiple train/val/test splits")
+    check_person_splits(people, splits)
+except ValueError as exc:
+    ap.error(str(exc))
 print("sessions", sessions, "| train", train_s, "| val", val_s, "| test", test_s, flush=True)
 with Pool(args.workers, initializer=_init_worker, initargs=(args.zip,)) as pool:
     data = {k: load_split(members, s, pool) for k, s in (("train", train_s), ("val", val_s), ("test", test_s))}

@@ -1,13 +1,55 @@
 {
   "_comment": "Our gesture classes, recorded with record_session.py. Numbered 1-5 with no-action = 5 so the existing pipeline is unchanged: training label = id - 1 (5 outputs), board config.yaml outputs.channels = 5, live_gesture_bridge.py treats output 4 as 'no gesture'. NOTE: ids 1-4 here are NOT the organisers' dataset classes (their 01-04 = sit/lay-down/hello/dance) - when dataset clips are mixed in (e.g. as no-action negatives) they must be renamed. 'how' is shown on screen while recording; 'go2' is the robot action. Event camera: every gesture must be a REPEATED movement (still poses are invisible) with big arm motions (the model sees ~40x40 px). Left/right = the PERSON's own left/right. 'mirror' pairs: a horizontal-flip augmentation must swap these labels.",
   "classes": [
-    {"id": 1, "name": "heart",          "how": "both hands meet on top of your head (arms make a heart), open the arms out to the sides, back up, repeat", "go2": "finger heart (1036)"},
-    {"id": 2, "name": "turn-left-360",  "how": "STRETCH YOUR LEFT arm straight out to your left side at shoulder height, bring it back to your chest, repeat (keep moving - a held arm is invisible)", "go2": "turn left 360 deg (closed-loop turn)", "mirror": 3},
-    {"id": 3, "name": "turn-right-360", "how": "STRETCH YOUR RIGHT arm straight out to your right side at shoulder height, bring it back to your chest, repeat (keep moving - a held arm is invisible)", "go2": "turn right 360 deg (closed-loop turn)", "mirror": 2},
-    {"id": 4, "name": "namaskaram",     "how": "palms together in front of your chest, bow forward from the waist and come back up, repeat", "go2": "rear up and greet / scrape (1029)", "active": false, "note": "dropped for now (2026-11-21): too faint for the event camera; id kept so outputs stay 5"},
-    {"id": 5, "name": "no-action",      "how": "move naturally: talk with your hands, scratch your head, shift your weight - but NONE of the gestures", "go2": "nothing"}
+    {
+      "id": 1,
+      "name": "heart",
+      "how": "both hands meet on top of your head (arms make a heart), open the arms out to the sides, back up, repeat",
+      "go2": "finger heart (1036)"
+    },
+    {
+      "id": 2,
+      "name": "turn-left-360",
+      "how": "STRETCH YOUR LEFT arm straight out to your left side at shoulder height, bring it back to your chest, repeat (keep moving - a held arm is invisible)",
+      "go2": "turn left 360 deg (closed-loop turn)",
+      "mirror": 3
+    },
+    {
+      "id": 3,
+      "name": "turn-right-360",
+      "how": "STRETCH YOUR RIGHT arm straight out to your right side at shoulder height, bring it back to your chest, repeat (keep moving - a held arm is invisible)",
+      "go2": "turn right 360 deg (closed-loop turn)",
+      "mirror": 2
+    },
+    {
+      "id": 4,
+      "name": "follow-me",
+      "how": "WALK ON THE SPOT: walk normally without going anywhere - lift your feet a little and swing your arms like walking down the street, keep going",
+      "go2": "Reserved for person following; the existing bridge leaves this output unassigned",
+      "note": "2026-11-22: replaced namaskaram (dropped as too faint; its clips were deleted). Recorded as new sessions 31+ (--person = the person's earlier session), 3 min: facing the camera, then back to the camera (styles front/frontfast/back/backfast). Feet must be in view.",
+      "styles": [
+        "front",
+        "frontfast",
+        "back",
+        "backfast"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "no-action",
+      "how": "move naturally: talk with your hands, scratch your head, shift your weight - but NONE of the gestures (do not walk on the spot)",
+      "go2": "nothing"
+    }
   ],
   "presets": {
-    "all": [1, 2, 3]
+    "all": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "follow": [
+      4
+    ]
   }
 }

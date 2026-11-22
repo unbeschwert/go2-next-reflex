@@ -49,7 +49,7 @@ With the shipped 4096 the network gets 64× its training input (FPGA replay: 98.
 | `spleat_sim.py`, `sim_check.py` | integer model of the accelerator (matches the FPGA) |
 | `eval_params.py`, `fit_fpga.py`, `collect_results.py` | score exported weights, fit fixed-point details, tabulate runs |
 | `weights_convert.py`, `fpga_probe.py` | weights .txt ↔ riverops .json; send single frames |
-| `dataset/` | cued recorder, clip cutter with quality filters, exporter, `gestures.json` |
+| [`dataset/`](dataset/README.md) | cued recorder, clip cutter with quality filters, exporter, zip packer, `gestures.json` (how to record: [`dataset/README.md`](dataset/README.md)) |
 
 ## Train
 
@@ -62,7 +62,8 @@ python train_snn_v8.py --zip go2_gestures_s20-30.zip --arch nb40 --val 28 --test
 ```
 
 Dataset: 11 people (sessions 20-30), 2,442 one-second clips, split by person. The zip
-(649 MB) is shared separately; `dataset/export_sessions.py` rebuilds it from recordings.
+(649 MB) is shared separately; `dataset/export_sessions.py` rebuilds it from recordings. Sessions 31-33
+add follow me (walk on the spot) for the people of sessions 20-22 (`go2_gestures_s20-33.zip`).
 
 ## Deploy and test
 
