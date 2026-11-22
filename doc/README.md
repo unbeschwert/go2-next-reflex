@@ -14,6 +14,7 @@ Most of this is condensed from the organisers' RIVER SDK docs at https://riversd
 | [training-snn.md](training-snn.md) | Training an SNN with `riverops`: the reference notebook, the library, quantization and export |
 | [../training/README.md](../training/README.md) | **Our training pipeline**: GPU server, configs, KV260 memory-aware quantization, export to the Kria |
 | [data-augmentation.md](data-augmentation.md) | **Data augmentation** for robustness: what each one does and why, config, ablation runs, the QAT NaN fix |
+| [training-log.md](training-log.md) | **Training log**: every run with its settings and results, and what we learned from it |
 | [deploy-model.md](deploy-model.md) | Putting a trained SNN on the Kria: bitstream, server config, camera config, weights file |
 | [fpga-debugging.md](fpga-debugging.md) | **Learning record**: why the FPGA and the simulation disagreed (potentials never reset), each hypothesis and its test |
 | [go2-kria-overview.md](go2-kria-overview.md) | ROS 2 entry points, topics, reference action map and Yocto build for the Kria |

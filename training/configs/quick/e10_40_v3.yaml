@@ -1,0 +1,7 @@
+# 10-epoch quick comparison of motion_buddy_40_v3 (cosine over 7 epochs, average of the last 3).
+base: ../motion_buddy_40_v3.yaml
+name: e10_40_v3
+
+train:
+  epochs: 10
+  average_last: 3

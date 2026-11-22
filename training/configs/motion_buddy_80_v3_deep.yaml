@@ -1,0 +1,18 @@
+# v3 at 80x80 input (despot downsampling 4) with an extra layer in front (80 → 40), then v3 unchanged.
+# Keeps 40x40 detail in a spiking layer: 3x the neurons of v3, 48 of 108 BRAM36.
+base: motion_buddy_40_v3.yaml
+name: motion_buddy_80_v3_deep
+
+data:
+  downsampling: 4              # 320 / 4 = 80x80
+  max_shift: 8                 # +-8 px = the same +-10 % as at 40x40
+
+model:
+  layers:                      # 80 → 40 → 19 → 19 → 9 → 2 → 1
+    - {out: 16, kernel: 4, stride: 2, padding: 1}
+    - {out: 16, kernel: 5, stride: 2, padding: 1}
+    - {out: 16, kernel: 3, stride: 1, padding: 1}
+    - {out: 16, kernel: 6, stride: 2, padding: 2}
+    - {out: 128, kernel: 6, stride: 2, padding: 0}
+    - {out: classes, kernel: 2, stride: 1, padding: 0}
+  dropout_layers: [2, 3, 4]    # the same layers as in v3, shifted by the new first layer

@@ -1,0 +1,16 @@
+# v3 at 80x80 input (despot downsampling 4): the first layer (k7 s4) brings 80 down to 19,
+# the rest is v3 unchanged. Same neuron count and FPGA memory as v3 at 40x40.
+base: motion_buddy_40_v3.yaml
+name: motion_buddy_80_v3_s4
+
+data:
+  downsampling: 4              # 320 / 4 = 80x80
+  max_shift: 8                 # +-8 px = the same +-10 % as at 40x40
+
+model:
+  layers:                      # 80 → 19 → 19 → 9 → 2 → 1
+    - {out: 16, kernel: 7, stride: 4, padding: 1}
+    - {out: 16, kernel: 3, stride: 1, padding: 1}
+    - {out: 16, kernel: 6, stride: 2, padding: 2}
+    - {out: 128, kernel: 6, stride: 2, padding: 0}
+    - {out: classes, kernel: 2, stride: 1, padding: 0}

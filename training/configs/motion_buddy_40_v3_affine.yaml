@@ -1,0 +1,7 @@
+# motion_buddy_40_v3 + zoom/rotation: spatial was the best augmentation group in the ablations,
+# and test person 14 is small and off-centre.
+base: motion_buddy_40_v3.yaml
+name: motion_buddy_40_v3_affine
+
+augment:
+  affine: {p: 0.5, scale: [0.8, 1.2], rotate_deg: 10}
