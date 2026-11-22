@@ -25,20 +25,22 @@ INPUT_SHAPE = (STEPS, 2, GRID, GRID)
 RECORDING = re.compile(r"motion_buddy_dataset/(\d{2})/gesture_\d+-(.+)-(?:fast|large|normal)-\d+\.bin")
 
 
-def input_shape(ticks_per_step):
+def input_shape(ticks_per_step, grid=GRID):
     if ticks_per_step <= 0 or ticks_per_step > CLIP_TICKS // 2 or CLIP_TICKS % ticks_per_step:
         raise ValueError("The bin size must divide a one-second clip into at least two equal bins.")
-    return (CLIP_TICKS // ticks_per_step, 2, GRID, GRID)
+    if grid <= 0 or SIZE % grid:
+        raise ValueError("The event grid must divide the camera resolution evenly.")
+    return (CLIP_TICKS // ticks_per_step, 2, grid, grid)
 
 
-def bin_events(events, timestamps, ticks_per_step=TICKS_PER_STEP):
-    shape = input_shape(ticks_per_step)
+def bin_events(events, timestamps, ticks_per_step=TICKS_PER_STEP, *, grid=GRID):
+    shape = input_shape(ticks_per_step, grid)
     limit = np.searchsorted(timestamps, int(timestamps[0]) + CLIP_TICKS)
     steps = ((timestamps[:limit] - timestamps[0]) // ticks_per_step).astype(np.int64)
     events = events[:limit]
-    factor = SIZE // GRID
-    flat_index = ((steps * 2 + events["p"]) * GRID + events["y"] // factor) * GRID + events["x"] // factor
-    counts = np.bincount(flat_index, minlength=shape[0] * 2 * GRID * GRID).reshape(shape)
+    factor = SIZE // grid
+    flat_index = ((steps * 2 + events["p"]) * grid + events["y"] // factor) * grid + events["x"] // factor
+    counts = np.bincount(flat_index, minlength=int(np.prod(shape))).reshape(shape)
     return np.minimum(counts, MAX_COUNT)
 
 

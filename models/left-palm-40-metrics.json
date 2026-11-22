@@ -1,0 +1,157 @@
+{
+  "horizon_ms": 50,
+  "input_ms": 100,
+  "grid": 40,
+  "precision": "qat",
+  "epochs": 100,
+  "seed": 17,
+  "folds": [
+    {
+      "train": [
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-normal-32.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-fast-32.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-large-32.bin"
+      ],
+      "test": [
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-normal-09.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-fast-09.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-large-09.bin"
+      ],
+      "metrics": {
+        "snn": {
+          "forecasts": 31,
+          "median_px": 8.909552574157715,
+          "p90_px": 15.335772514343262,
+          "mean_px": 9.496690775117566,
+          "max_px": 20.08620262145996,
+          "within_10_px": 0.6129032258064516,
+          "within_30_px": 1.0
+        },
+        "manual_hold": {
+          "forecasts": 31,
+          "median_px": 14.866068747318506,
+          "p90_px": 22.80350850198276,
+          "mean_px": 14.828167902149175,
+          "max_px": 24.698178070456937,
+          "within_10_px": 0.22580645161290322,
+          "within_30_px": 1.0
+        },
+        "manual_velocity": {
+          "forecasts": 31,
+          "median_px": 6.4031242374328485,
+          "p90_px": 11.180339887498949,
+          "mean_px": 6.702984067165788,
+          "max_px": 14.212670403551895,
+          "within_10_px": 0.8709677419354839,
+          "within_30_px": 1.0
+        },
+        "seeded_tracker_velocity": {
+          "forecasts": 31,
+          "median_px": 10.04987562112089,
+          "p90_px": 14.317821063276353,
+          "mean_px": 11.335982284517865,
+          "max_px": 61.1310068623117,
+          "within_10_px": 0.4838709677419355,
+          "within_30_px": 0.967741935483871
+        }
+      }
+    },
+    {
+      "train": [
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-normal-09.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-fast-09.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-large-09.bin"
+      ],
+      "test": [
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-normal-32.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-fast-32.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-large-32.bin"
+      ],
+      "metrics": {
+        "snn": {
+          "forecasts": 32,
+          "median_px": 23.26209545135498,
+          "p90_px": 39.77128829956055,
+          "mean_px": 22.818329425528646,
+          "max_px": 43.34559631347656,
+          "within_10_px": 0.15625,
+          "within_30_px": 0.71875
+        },
+        "manual_hold": {
+          "forecasts": 32,
+          "median_px": 13.049499802591754,
+          "p90_px": 17.87169395266542,
+          "mean_px": 12.94270576572299,
+          "max_px": 20.248456731316587,
+          "within_10_px": 0.3125,
+          "within_30_px": 1.0
+        },
+        "manual_velocity": {
+          "forecasts": 32,
+          "median_px": 4.73606797749979,
+          "p90_px": 8.54400374531753,
+          "mean_px": 5.132572153003983,
+          "max_px": 9.848857801796104,
+          "within_10_px": 1.0,
+          "within_30_px": 1.0
+        },
+        "seeded_tracker_velocity": {
+          "forecasts": 32,
+          "median_px": 12.345352609732906,
+          "p90_px": 56.21706921291466,
+          "mean_px": 25.101430617597295,
+          "max_px": 100.4987562112089,
+          "within_10_px": 0.46875,
+          "within_30_px": 0.59375
+        }
+      }
+    }
+  ],
+  "baseline_comparison": {
+    "snn": {
+      "forecasts": 63,
+      "median_px": 13.165546417236328,
+      "p90_px": 32.98719024658203,
+      "mean_px": 16.263237391199386,
+      "max_px": 43.34559631347656,
+      "within_10_px": 0.38095238095238093,
+      "within_30_px": 0.8571428571428571
+    },
+    "manual_hold": {
+      "forecasts": 63,
+      "median_px": 13.892443989449804,
+      "p90_px": 20.19876538505327,
+      "mean_px": 13.870472848726353,
+      "max_px": 24.698178070456937,
+      "within_10_px": 0.2698412698412698,
+      "within_30_px": 1.0
+    },
+    "manual_velocity": {
+      "forecasts": 63,
+      "median_px": 5.385164807134504,
+      "p90_px": 9.391093797103862,
+      "mean_px": 5.905314523464554,
+      "max_px": 14.212670403551895,
+      "within_10_px": 0.9365079365079365,
+      "within_30_px": 1.0
+    },
+    "seeded_tracker_velocity": {
+      "forecasts": 63,
+      "median_px": 10.295630140987,
+      "p90_px": 45.82867245207124,
+      "mean_px": 18.327956041002647,
+      "max_px": 100.4987562112089,
+      "within_10_px": 0.47619047619047616,
+      "within_30_px": 0.7777777777777778
+    }
+  },
+  "snn_all_labeled_targets": {
+    "forecasts": 76,
+    "median_px": 14.220093727111816,
+    "p90_px": 38.11891174316406,
+    "mean_px": 17.729141646309902,
+    "max_px": 65.26618957519531,
+    "within_10_px": 0.35526315789473684,
+    "within_30_px": 0.8421052631578947
+  }
+}

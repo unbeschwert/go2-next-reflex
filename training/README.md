@@ -137,3 +137,34 @@ python -m training.riverops_commands --checkpoint .local/training/commands-river
 ```
 
 Upload `movement_model.json` to RiverSDK to build the firmware. The board loads the matching `weights.txt`. Reproduce the training input when replaying events on the FPGA: two polarity channels on a `32 × 32` grid, ten 100,000-tick bins, and counts capped at 63 and divided by the source pixel area per cell. From the live camera this requires binning compatible with that grid and timing. Verify the four output counts on held-out recordings against RiverOps before using them as motion requests. [Durance model export guide](https://riversdk.dev/docs/hackathon/train_handgesture_recognition.html#Export-the-model-architecture)
+
+## 40×40 left-palm forecast
+
+The model uses four 25 ms event bins on a 40×40 grid to forecast the performer's left palm in the following 50 ms window. The output is in native 320×320 camera pixels. The portable model contains 7,152 signed INT8 weights for the convolution and coordinate readout layers, plus FP32 channel scales and biases. PyTorch dequantizes weights for replay and uses the quantized input and membrane simulation from training.
+
+The pilot uses [85 visible palm annotations](../labeling/session20_left_palm.csv) across six clips from one Session 20 performer. The two evaluation folds hold out one whole clip per motion style. Across all 76 held-out forecast windows, the median error was 14.2 px and 64 predictions landed within 30 px (84%). The two-fold [results](../models/left-palm-40-metrics.json) include a separate comparison on 63 windows with hand-labeled inputs for the motion baselines. The [exported model](../models/left-palm-40-int8.json) was refit on all six clips after evaluation.
+
+### Replay the model
+
+Run from the repository root with Python, NumPy and PyTorch. Keep `go2_gestures_s20.zip` in the repository root for archive replay, or use `--recording` with a local one-second event capture.
+
+```sh
+python -m training.left_palm_bridge --member motion_buddy_dataset/20/gesture_02-turn-left-360-normal-09.bin
+```
+
+The bridge writes one JSON line per 50 ms of sensor time with `target_window_start_us`, `target_window_end_us`, `left_palm_x`, and `left_palm_y`. The first prediction follows 100 ms of input. With no recording argument, the bridge reads JSON lines from standard input. Each line covers a 25 ms bin and contains an integer `window_start_us` and nonnegative integer `counts` with shape `[2, 40, 40]`, in OFF, ON order. Sum events per 8×8 sensor cell. Include zero-filled bins for quiet intervals and use contiguous sensor timestamps. A timestamp gap clears the context, and an all-zero context emits null coordinates. The model has no visibility head, so coordinates from other motion or occlusion still require validation.
+
+Pass `--ros-topic /left_palm/forecast` from a ROS 2 environment with `rclpy` and `std_msgs` to publish the JSON messages as `std_msgs/msg/String`. A live capture adapter must supply the input bins. The bridge produces coordinate telemetry. The existing gesture bridge uses a separate five-spike output contract and publishes robot commands.
+
+### Reproduce training and export
+
+Training also requires SciPy for the seeded-tracker baseline. The replay path does not import SciPy.
+
+```sh
+python -m training.train_left_palm --grid 40 --precision qat --output .local/training/left-palm-snn-40-qat
+python -m training.export_left_palm --checkpoint .local/training/left-palm-snn-40-qat/left-palm-snn.pt --output models/left-palm-40-int8.json
+```
+
+### Kria deployment status
+
+The JSON bundle targets the laptop PyTorch runtime. RiverSDK firmware requires a supported spiking output head, a native RiverOps architecture export and matching `weights.txt`. The current two-coordinate linear head and time pooling run in software. Native deployment needs an FPGA-compatible readout or a bridge that can read the FPGA feature maps, followed by RiverOps replay and an on-board timing check. The RiverOps SDK and live board were unavailable for this pilot.

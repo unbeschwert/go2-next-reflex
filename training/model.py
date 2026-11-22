@@ -28,7 +28,7 @@ def quantized_weight(weight):
 
 class GestureSNN(nn.Module):
     def __init__(self, num_classes=len(CLASSES), *, width="compact", precision="qat",
-                 event_encoding="polarity-counts", ticks_per_step=TICKS_PER_STEP):
+                 event_encoding="polarity-counts", ticks_per_step=TICKS_PER_STEP, grid=GRID):
         super().__init__()
         if event_encoding not in EVENT_ENCODINGS:
             raise ValueError(f"Unknown event encoding: {event_encoding}")
@@ -40,7 +40,7 @@ class GestureSNN(nn.Module):
             nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, padding=1)
             for in_channels, out_channels in zip(channels[:-1], channels[1:])
         )
-        self.classifier = nn.Linear(2 * channels[-1] * (GRID // 8) ** 2, num_classes)
+        self.classifier = nn.Linear(2 * channels[-1] * ((grid + 7) // 8) ** 2, num_classes)
         for layer in self.convolutions:
             nn.init.kaiming_normal_(layer.weight)
             nn.init.zeros_(layer.bias)
