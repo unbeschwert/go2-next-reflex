@@ -1,58 +1,361 @@
 Panels:
   - Class: rviz_common/Displays
+    Help Height: 70
     Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+      Splitter Ratio: 0.5
+    Tree Height: 783
 Visualization Manager:
   Class: ""
   Displays:
-    - Class: rviz_default_plugins/Grid
-      Name: Floor
-      Enabled: true
+    - Alpha: 0.5
       Cell Size: 0.25
-      Plane Cell Count: 16
+      Class: rviz_default_plugins/Grid
       Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.029999999329447746
+        Value: Lines
+      Name: Floor
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 16
       Reference Frame: world
       Value: true
-    - Class: rviz_default_plugins/RobotModel
-      Name: Go2
-      Enabled: true
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Collision Enabled: false
+      Description File: ""
       Description Source: Topic
       Description Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
         Value: /robot_description
-      Visual Enabled: true
-      Collision Enabled: false
-      Value: true
-    - Class: rviz_default_plugins/Marker
-      Name: Action label
       Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        FL_calf:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        FL_calf_rotor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        FL_calflower:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        FL_calflower1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        FL_foot:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        FL_hip:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        FL_hip_rotor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        FL_thigh:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        FL_thigh_rotor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        FR_calf:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        FR_calf_rotor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        FR_calflower:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        FR_calflower1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        FR_foot:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        FR_hip:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        FR_hip_rotor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        FR_thigh:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        FR_thigh_rotor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        Head_lower:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        Head_upper:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        Link Tree Style: Links in Alphabetic Order
+        RL_calf:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        RL_calf_rotor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        RL_calflower:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        RL_calflower1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        RL_foot:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        RL_hip:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        RL_hip_rotor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        RL_thigh:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        RL_thigh_rotor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        RR_calf:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        RR_calf_rotor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        RR_calflower:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        RR_calflower1:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        RR_foot:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        RR_hip:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        RR_hip_rotor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        RR_thigh:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        RR_thigh_rotor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        base:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        front_camera:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        imu:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        radar:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+      Mass Properties:
+        Inertia: false
+        Mass: false
+      Name: Go2
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Action label
+      Namespaces:
+        label: true
       Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
         Value: /go2_viz/label
       Value: true
     - Class: rviz_default_plugins/MarkerArray
-      Name: FPGA scores
       Enabled: true
+      Name: FPGA scores
+      Namespaces:
+        bars: true
+        labels: true
+        status: true
       Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
         Value: /go2_viz/scores
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Virtual person
+      Namespaces:
+        person: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /go2_viz/person
+      Value: true
+    - Class: rviz_default_plugins/InteractiveMarkers
+      Enable Transparency: true
+      Enabled: true
+      Interactive Markers Namespace: /go2_viz/person_drag
+      Name: Drag the person
+      Show Axes: false
+      Show Descriptions: true
+      Show Visual Aids: false
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: false
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Live camera (board)
+      Normalize Range: true
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /kria/camera_view
+      Value: false
+  Enabled: true
   Global Options:
     Background Color: 38; 40; 46
     Fixed Frame: world
     Frame Rate: 30
+  Name: root
   Tools:
     - Class: rviz_default_plugins/Interact
+      Hide Inactive Objects: true
     - Class: rviz_default_plugins/MoveCamera
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
   Value: true
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 2.1
+      Distance: 5.816866874694824
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
       Focal Point:
-        X: -0.25
-        Y: 0
-        Z: 0.32
-      Pitch: 0.32
-      Yaw: 0.45
+        X: -0.7518064379692078
+        Y: -0.19865047931671143
+        Z: -0.08273938298225403
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
       Name: Current View
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.9699997901916504
       Target Frame: <Fixed Frame>
+      Value: Orbit (rviz_default_plugins)
+      Yaw: 3.1581382751464844
+    Saved: ~
 Window Geometry:
-  Height: 800
-  Width: 1100
+  Displays:
+    collapsed: false
+  Height: 1011
+  Hide Left Dock: false
+  Hide Right Dock: false
+  Live camera (board):
+    collapsed: false
+  QMainWindow State: 000000ff00000000fd00000001000000000000016700000395fc0200000002fb000000100044006900730070006c006100790073010000003f00000395000000cc00fffffffb00000026004c006900760065002000630061006d006500720061002000280062006f00610072006400290000000309000000cb0000001700ffffff000005d70000039500000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Width: 1860
+  X: 60
+  Y: 32

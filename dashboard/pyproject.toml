@@ -1,0 +1,20 @@
+[project]
+name = "durance-dashboard"
+version = "1.0.0"
+description = "Operator dashboard for the Durance AI gesture-controlled Go2 (Kria KV260 SNN)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "httpx>=0.27",
+    "numpy>=1.26",
+    "opencv-python-headless>=4.8",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# the system ROS 2 installation registers pytest plugins (launch_testing) that need ROS-only packages
+addopts = "-p no:cacheprovider"
