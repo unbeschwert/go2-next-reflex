@@ -137,6 +137,8 @@ Measured on #23–#26 with `scripts/recompute_bn.py` (same averaged weights, onl
 
 Test improves in all four (+0.1 to +1.1), val moves ±2 points either way. Because the weights are identical, this is a paired comparison without the seed noise: a small but consistent gain, as expected with a learning rate at its floor over the averaged epochs.
 
+Applied to the deployment candidate #14 (40×40 v3, average of 10 epochs; copy `motion-buddy-40-v3-bn`): fixed point 71.9 / 75.3 → **69.2 / 75.1**, float 71.5 / 76.8 → 71.7 / 75.1. No gain here (test −0.2, val −2.7), so across five runs the effect is about ±1 point on test: the correct method, but not a measurable accuracy change. #14 keeps its original export.
+
 ## Open questions and next runs
 
 - 80×80 at 40 epochs: `motion_buddy_80_v3_s4.yaml` and `motion_buddy_80_v3_deep.yaml` (#18/#19 looked promising for person 14 after 10 epochs). Before deploying, check that SPLEAT keeps up at 100 Hz with ~4× more active input pixels.
