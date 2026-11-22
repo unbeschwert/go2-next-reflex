@@ -3,11 +3,12 @@
 
 Passively listens on the loopback interface to the TCP connection between the
 camera client (despot_send_and_forget) and the SPLEAT server (127.0.0.1:3333):
-  * upstream:   input frames  {id, payload = float32[2][80][80]}  at 100 Hz
+  * upstream:   input frames  {id, payload = float32[2][S][S]}  at 100 Hz (S = model input size,
+                detected from the payload: 80 or 40)
   * downstream: model outputs {id, payload = float32[5], latency} at 100 Hz
 Nothing is modified - inference keeps running exactly as before.
 
-    python3 /root/snn_input_viewer.py [port]     ->  http://192.168.77.1:8080
+    python3 /root/snn_input_viewer.py [port] [dataset|own]     ->  http://192.168.77.1:8080
 """
 import socket
 import struct
@@ -22,15 +23,18 @@ import numpy as np
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
 SERVER_PORT = 3333
-H = W = 80
-SCALE = 6
+VIEW = 480                           # displayed size of the input frame (pixels)
 N_OUT = 5
-LABELS = ["o0 Sit?", "o1 Hello?", "o2 Dance?", "o3 ?", "o4 none"]
+LABEL_SETS = {  # second argument: which model is loaded (default: the organisers' gestures)
+    "dataset": ["o0 Sit", "o1 Lay down", "o2 Hello", "o3 Dance", "o4 none"],
+    "own": ["o0 Heart", "o1 Turn left", "o2 Turn right", "o3 (unused)", "o4 none"],
+}
+LABELS = LABEL_SETS[sys.argv[2] if len(sys.argv) > 2 else "dataset"]
 COLORS = [(40, 115, 240), (255, 190, 75), (230, 90, 215), (115, 230, 90), (150, 150, 150)]  # BGR
 
 lock = threading.Lock()
 frames = deque(maxlen=5)             # last 50 ms of input frames
-outs = deque(maxlen=50)              # last 0.5 s of model outputs
+outs = deque(maxlen=400)             # (arrival time, spikes) of the latest model outputs
 stats = {"in": 0, "out": 0, "lat": 0, "t": time.time(), "in_hz": 0.0, "resync": 0}
 latest_jpeg = None
 
@@ -80,10 +84,15 @@ class Stream:
 
 def on_input(body):
     p, _ = parse_payload(body)
-    if p is None or len(p) != 2 * H * W * 4:
+    if p is None or len(p) % 8:
         return
-    a = np.frombuffer(p, "<f4").reshape(2, H, W)
+    side = int(round((len(p) // 8) ** 0.5))          # float32[2][side][side]
+    if side < 8 or side * side * 8 != len(p):
+        return
+    a = np.frombuffer(p, "<f4").reshape(2, side, side)
     with lock:
+        if frames and frames[-1].shape != a.shape:    # model size changed (new firmware)
+            frames.clear()
         frames.append(a)
         stats["in"] += 1
 
@@ -95,7 +104,7 @@ def on_output(body):
     sc = struct.unpack(f"<{N_OUT}f", p)
     j = body.find(b"\x67latency")
     with lock:
-        outs.append([1.0 if x > 0 else 0.0 for x in sc])
+        outs.append((time.time(), [1.0 if x > 0 else 0.0 for x in sc]))
         stats["out"] += 1
         if j >= 0 and body[j + 8] == 0x19:
             stats["lat"] = struct.unpack(">H", body[j + 9:j + 11])[0]
@@ -137,14 +146,18 @@ def render():
             if now - stats["t"] >= 1:
                 stats["in_hz"] = stats["in"] / (now - stats["t"])
                 stats["in"], stats["out"], stats["t"] = 0, 0, now
-        img = np.full((H, W, 3), 18, np.uint8)
+        side = fr[0].shape[1] if fr else 40
+        img = np.full((side, side, 3), 18, np.uint8)
         if fr:
-            acc = np.sum(fr, axis=0)                 # [2, 80, 80] over last 50 ms
+            acc = np.sum(fr, axis=0)                 # [2, side, side] over last 50 ms
             img[acc[1] > 0] = (255, 120, 40)         # channel 1 (OFF?) blue
             img[acc[0] > 0] = (255, 255, 255)        # channel 0 (ON?) white
-        big = cv2.resize(img, (W * SCALE, H * SCALE), interpolation=cv2.INTER_NEAREST)
-        rates = [sum(f[i] for f in o) / len(o) for i in range(N_OUT)] if o else [0.0] * N_OUT
-        panel = np.full((170, W * SCALE, 3), 28, np.uint8)
+        big = cv2.resize(img, (VIEW, VIEW), interpolation=cv2.INTER_NEAREST)
+        # bars = firing over the last 0.5 s of real time. The camera client only sends frames that
+        # contain events, so a quiet scene delivers few frames: missing frames count as silence.
+        o = [f for t, f in o if now - t <= 0.5]
+        rates = [sum(f[i] for f in o) / max(len(o), 25) for i in range(N_OUT)]
+        panel = np.full((170, VIEW, 3), 28, np.uint8)
         top = int(np.argmax(rates))
         for i, r in enumerate(rates):
             y = 14 + i * 31
@@ -154,7 +167,7 @@ def render():
             cv2.putText(panel, f"{r:.2f}", (455, y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
                         (255, 255, 255) if i == top and r > 0.3 else (160, 160, 160), 1, cv2.LINE_AA)
         out = np.vstack([big, panel])
-        cv2.putText(out, f"SNN input 2x80x80 @ {stats['in_hz']:.0f} Hz   FPGA latency {stats['lat']/1000:.1f} ms",
+        cv2.putText(out, f"FPGA input: {side}x{side} pixels, {stats['in_hz']:.0f} frames/s   latency {stats['lat']/1000:.1f} ms",
                     (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 210, 255), 1, cv2.LINE_AA)
         ok, jpg = cv2.imencode(".jpg", out, [cv2.IMWRITE_JPEG_QUALITY, 85])
         if ok:
@@ -168,9 +181,10 @@ flex-direction:column;align-items:center;padding:16px}img{max-width:100%;border:
 p{color:#999;font-size:14px;max-width:480px}</style></head><body>
 <h3>What the SNN sees (top) and decides (bars) - live from the Kria</h3>
 <img id="v" src="/stream" alt="live SNN view">
-<p>Top: the exact 80x80 event frames sent to the FPGA (white = brighter, blue = darker, last 50 ms).
+<p>Top: the exact event frames sent to the FPGA (white = brighter, blue = darker, last 50 ms).
 Bars: how often each FPGA output fired in the last 0.5 s. A gesture triggers a trick when its bar
-stays at or above 0.50 for 0.4 s and beats the next gesture output by 0.20 (o4 "none" is not compared).</p>
+stays at or above 0.50 and clearly beats the other gesture outputs (the exact rule per model is in
+live_gesture_bridge.py: TEST_RULES / ROBOT_RULES).</p>
 <script>const v=document.getElementById('v');v.onerror=()=>setTimeout(()=>{v.src='/stream?'+Date.now()},1000);</script>
 </body></html>"""
 

@@ -23,6 +23,7 @@ Event camera ──► Data recording ──► SNN training ──► Kria KV26
 |---|---|
 | `doc/` | Team notes: board setup, data capture, dataset, training, deployment, FPGA debugging, gesture pipeline |
 | `training/` | SNN training pipeline (`python -m training.snn`), configs, quantization and export for the Kria |
+| `training/optimised_snn/` | 8-bit quantization-aware SNN for the 40×40 firmware: training, FPGA replay tests, integer simulator, dataset tools (deployed models in `models/optimised_snn/`) |
 | `remote/` | Scripts to run training on the GPU server (setup, push data, train, fetch results) |
 | `scripts/` | Helper scripts: event and augmentation viewers, FPGA client (`fpga.py`), FPGA debugging checks (`fpga_debug/`) |
 | `kria/` | Runs on the Kria: inference control script, FPGA output → Go2 command bridge, live SNN view |

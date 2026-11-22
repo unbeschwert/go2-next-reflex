@@ -60,12 +60,21 @@ inputs:
   channels: 2              # ON/OFF polarity
   height: 80               # must match the frames despot sends (320 / downsampling)
   width: 80
-  scaling: 4096.0          # = 2^frac_bits of the potential format (Q4.12 → 4096)
+  scaling: 256.0           # = 4096 / downsampling² for models trained on "mean" frames (see below)
 outputs:
   channels: 5              # number of classes / output neurons
   height: 1
   width: 1
 ```
+
+**`scaling` must undo despot's block sums.** despot (`despot_send_and_forget`) sends the **sum** of
+the events in each downsampling block (payload values are whole numbers 1, 2, 3, …; measured on
+the board on 2026-11-22). Training uses the **mean** ("mean" encoding: sum / block area), and the
+server multiplies the input by `scaling`. So `scaling = 4096 / downsampling²`: **256** for 80×80
+(downsampling 4), **64** for 40×40 (downsampling 8). With the shipped 4096 the network gets
+16× (80×80) or 64× (40×40) its training input. Replaying test clips of a 40×40 model at that
+scale dropped FPGA accuracy from 98.8 % to 37.5 %, with one output firing on almost everything;
+with `scaling: 64` it was 99.4 %. The live recorder `kria/snn_record.py` shows what despot sends.
 
 ## 3. Camera config: `/root/metavision_camera.json`
 

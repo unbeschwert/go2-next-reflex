@@ -72,7 +72,7 @@ gzip -dc yocto-hackathon-img.gz | sudo dd of=/dev/sdX bs=4M status=progress conv
 | Input size | 32×32 (320 averaged down) | `config.yaml` example: **80×80**; despot can only shrink by powers of 2 (320, 160, 80, 40, 20, …), so **32×32 can't be produced** | – |
 | Time step | 10 ms (100 steps per second) | despot `frequency: 100.0` → 10 ms ✓ | – |
 | Number of outputs | 5 classes | `config.yaml` example: 5 ✓ | expects **11** scores (DVS-Gesture) ✗ |
-| Potential format | Q4.12 | `scaling: 4096` = 2¹² ✓ | – |
+| Potential format | Q4.12 | `scaling` = 2¹² / downsampling² (despot sends block sums, training uses means): 256 for 80×80, 64 for 40×40, see [deploy-model.md](deploy-model.md) | – |
 
 Train at a size despot can produce, such as 80×80 or 40×40. The tracked Python
 bridge accepts five scores. Check its action table against your model's output
