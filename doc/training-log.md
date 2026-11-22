@@ -126,6 +126,17 @@ Assumptions in #14 (the notebook isn't in the repo): dropout after layers 1–3,
 
 **Weight averaging and BatchNorm (2026-11-22).** Every run with `average_last` up to here (#14–#22, and the four `optim-*` runs, which started before the change) averaged BatchNorm's stored running statistics along with the weights. That is only an approximation: each epoch's statistics belong to that epoch's weights. From the next runs on, the statistics are recomputed for the averaged weights with one pass over the training data (`train.recompute_bn`, as in SWA), and the log shows val accuracy with both.
 
+Measured on #23–#26 with `scripts/recompute_bn.py` (same averaged weights, only the statistics recomputed, then quantized again; runs `optim-*-bn`). Fixed point val / test in %:
+
+| Run | Averaged statistics | Recomputed | Test change |
+|---|---|---|---|
+| #23 Adam, seed 42 | 71.9 / 66.8 | 72.9 / 67.7 | +0.9 |
+| #24 Adam, seed 43 | 76.6 / 59.5 | 74.7 / 60.5 | +1.0 |
+| #25 AdamW 1e-2 | 73.9 / 65.8 | 75.4 / 65.9 | +0.1 |
+| #26 AdamW 1e-1 | 72.9 / 69.0 | 72.5 / 70.1 | +1.1 |
+
+Test improves in all four (+0.1 to +1.1), val moves ±2 points either way. Because the weights are identical, this is a paired comparison without the seed noise: a small but consistent gain, as expected with a learning rate at its floor over the averaged epochs.
+
 ## Open questions and next runs
 
 - 80×80 at 40 epochs: `motion_buddy_80_v3_s4.yaml` and `motion_buddy_80_v3_deep.yaml` (#18/#19 looked promising for person 14 after 10 epochs). Before deploying, check that SPLEAT keeps up at 100 Hz with ~4× more active input pixels.
