@@ -1,0 +1,507 @@
+{
+ "summary": {
+  "nb40_own4": {
+   "rounds": 3,
+   "bitstream_md5": "f8aaa0bda55114290337ddc27ca81496",
+   "fabric_clock_mhz": [
+    100.0
+   ],
+   "latency_ms": {
+    "median": 0.184,
+    "mean": 0.2032,
+    "p90": 0.288,
+    "p99": 0.545,
+    "max": 3.819,
+    "min": 0.096
+   },
+   "power_idle_w": {
+    "mean": 3.4152,
+    "std_between_rounds": 0.0023
+   },
+   "power_replay_w": {
+    "mean": 3.7753,
+    "std_between_rounds": 0.0021
+   },
+   "accuracy_pct": [
+    100.0
+   ],
+   "outputs_vs_reference": [
+    "bit-exact"
+   ]
+  },
+  "nb40_better_latency": {
+   "rounds": 3,
+   "bitstream_md5": "76d235275ab130fa412d9023825f2cca",
+   "fabric_clock_mhz": [
+    100.0
+   ],
+   "latency_ms": {
+    "median": 0.184,
+    "mean": 0.2034,
+    "p90": 0.287,
+    "p99": 0.543,
+    "max": 5.864,
+    "min": 0.096
+   },
+   "power_idle_w": {
+    "mean": 3.4215,
+    "std_between_rounds": 0.0009
+   },
+   "power_replay_w": {
+    "mean": 3.782,
+    "std_between_rounds": 0.003
+   },
+   "accuracy_pct": [
+    100.0
+   ],
+   "outputs_vs_reference": [
+    "bit-exact"
+   ]
+  },
+  "nb40_less_resources": {
+   "rounds": 3,
+   "bitstream_md5": "5db024499a2975c53968f6c7cb66c3f2",
+   "fabric_clock_mhz": [
+    100.0
+   ],
+   "latency_ms": {
+    "median": 0.184,
+    "mean": 0.203,
+    "p90": 0.287,
+    "p99": 0.556,
+    "max": 4.82,
+    "min": 0.095
+   },
+   "power_idle_w": {
+    "mean": 3.4189,
+    "std_between_rounds": 0.002
+   },
+   "power_replay_w": {
+    "mean": 3.7829,
+    "std_between_rounds": 0.0049
+   },
+   "accuracy_pct": [
+    100.0
+   ],
+   "outputs_vs_reference": [
+    "bit-exact"
+   ]
+  }
+ },
+ "runs": [
+  {
+   "setup": "nb40_own4",
+   "round": 1,
+   "switch": "setup nb40_own4 | input  height: 40  scaling: 64.0  height: 1 | camera \"downsampling\":8 | weights 2d8fac769fbe | server active | app 1",
+   "bitstream_md5": "f8aaa0bda55114290337ddc27ca81496",
+   "weights_md5": "2d8fac769fbe0e55d0144da3d6ba2feb",
+   "fabric_clock_mhz": 100.0,
+   "sensors_before": {
+    "ams/temp1_input": 30.06,
+    "ams/temp2_input": 30.075,
+    "ams/temp3_input": 28.661,
+    "pwmfan/pwm1": 15
+   },
+   "power_idle_w": {
+    "mean": 3.4182,
+    "median": 3.35,
+    "std": 0.1218,
+    "max": 3.83,
+    "n": 269
+   },
+   "power_replay_w": {
+    "mean": 3.7741,
+    "median": 3.73,
+    "std": 0.1473,
+    "max": 4.23,
+    "n": 110
+   },
+   "sensors_after": {
+    "ams/temp1_input": 29.36,
+    "ams/temp2_input": 29.671,
+    "ams/temp3_input": 28.148,
+    "pwmfan/pwm1": 15
+   },
+   "eval": {
+    "accuracy_pct": 100.0,
+    "latency_ms": {
+     "median": 0.18,
+     "mean": 0.2,
+     "p90": 0.29,
+     "p99": 0.53,
+     "max": 2.81
+    },
+    "replay_frames_per_s": 1358,
+    "npz": "measurements/nb40_own4_round1.npz"
+   }
+  },
+  {
+   "setup": "nb40_better_latency",
+   "round": 1,
+   "switch": "setup nb40_better_latency | input  height: 40  scaling: 64.0  height: 1 | camera \"downsampling\":8 | weights 2d8fac769fbe | server active | app 1",
+   "bitstream_md5": "76d235275ab130fa412d9023825f2cca",
+   "weights_md5": "2d8fac769fbe0e55d0144da3d6ba2feb",
+   "fabric_clock_mhz": 100.0,
+   "sensors_before": {
+    "ams/temp1_input": 29.764,
+    "ams/temp2_input": 29.78,
+    "ams/temp3_input": 28.459,
+    "pwmfan/pwm1": 15
+   },
+   "power_idle_w": {
+    "mean": 3.4202,
+    "median": 3.35,
+    "std": 0.1292,
+    "max": 4.05,
+    "n": 269
+   },
+   "power_replay_w": {
+    "mean": 3.7861,
+    "median": 3.74,
+    "std": 0.1308,
+    "max": 4.19,
+    "n": 107
+   },
+   "sensors_after": {
+    "ams/temp1_input": 30.153,
+    "ams/temp2_input": 30.029,
+    "ams/temp3_input": 27.977,
+    "pwmfan/pwm1": 15
+   },
+   "eval": {
+    "accuracy_pct": 100.0,
+    "latency_ms": {
+     "median": 0.18,
+     "mean": 0.2,
+     "p90": 0.29,
+     "p99": 0.54,
+     "max": 4.03
+    },
+    "replay_frames_per_s": 1371,
+    "npz": "measurements/nb40_better_latency_round1.npz"
+   }
+  },
+  {
+   "setup": "nb40_less_resources",
+   "round": 1,
+   "switch": "setup nb40_less_resources | input  height: 40  scaling: 64.0  height: 1 | camera \"downsampling\":8 | weights 2d8fac769fbe | server active | app 1",
+   "bitstream_md5": "5db024499a2975c53968f6c7cb66c3f2",
+   "weights_md5": "2d8fac769fbe0e55d0144da3d6ba2feb",
+   "fabric_clock_mhz": 100.0,
+   "sensors_before": {
+    "ams/temp1_input": 29.562,
+    "ams/temp2_input": 29.687,
+    "ams/temp3_input": 27.783,
+    "pwmfan/pwm1": 15
+   },
+   "power_idle_w": {
+    "mean": 3.4162,
+    "median": 3.35,
+    "std": 0.1185,
+    "max": 3.91,
+    "n": 269
+   },
+   "power_replay_w": {
+    "mean": 3.7842,
+    "median": 3.74,
+    "std": 0.1298,
+    "max": 4.18,
+    "n": 109
+   },
+   "sensors_after": {
+    "ams/temp1_input": 30.169,
+    "ams/temp2_input": 29.578,
+    "ams/temp3_input": 28.435,
+    "pwmfan/pwm1": 15
+   },
+   "eval": {
+    "accuracy_pct": 100.0,
+    "latency_ms": {
+     "median": 0.18,
+     "mean": 0.2,
+     "p90": 0.29,
+     "p99": 0.56,
+     "max": 2.48
+    },
+    "replay_frames_per_s": 1381,
+    "npz": "measurements/nb40_less_resources_round1.npz"
+   }
+  },
+  {
+   "setup": "nb40_less_resources",
+   "round": 2,
+   "switch": "setup nb40_less_resources | input  height: 40  scaling: 64.0  height: 1 | camera \"downsampling\":8 | weights 2d8fac769fbe | server active | app 1",
+   "bitstream_md5": "5db024499a2975c53968f6c7cb66c3f2",
+   "weights_md5": "2d8fac769fbe0e55d0144da3d6ba2feb",
+   "fabric_clock_mhz": 100.0,
+   "sensors_before": {
+    "ams/temp1_input": 29.469,
+    "ams/temp2_input": 29.998,
+    "ams/temp3_input": 27.511,
+    "pwmfan/pwm1": 15
+   },
+   "power_idle_w": {
+    "mean": 3.4196,
+    "median": 3.36,
+    "std": 0.1233,
+    "max": 4.02,
+    "n": 268
+   },
+   "power_replay_w": {
+    "mean": 3.7882,
+    "median": 3.76,
+    "std": 0.1509,
+    "max": 4.24,
+    "n": 108
+   },
+   "sensors_after": {
+    "ams/temp1_input": 29.329,
+    "ams/temp2_input": 28.878,
+    "ams/temp3_input": 27.783,
+    "pwmfan/pwm1": 15
+   },
+   "eval": {
+    "accuracy_pct": 100.0,
+    "latency_ms": {
+     "median": 0.18,
+     "mean": 0.2,
+     "p90": 0.29,
+     "p99": 0.55,
+     "max": 4.82
+    },
+    "replay_frames_per_s": 1390,
+    "npz": "measurements/nb40_less_resources_round2.npz"
+   }
+  },
+  {
+   "setup": "nb40_better_latency",
+   "round": 2,
+   "switch": "setup nb40_better_latency | input  height: 40  scaling: 64.0  height: 1 | camera \"downsampling\":8 | weights 2d8fac769fbe | server active | app 1",
+   "bitstream_md5": "76d235275ab130fa412d9023825f2cca",
+   "weights_md5": "2d8fac769fbe0e55d0144da3d6ba2feb",
+   "fabric_clock_mhz": 100.0,
+   "sensors_before": {
+    "ams/temp1_input": 29.407,
+    "ams/temp2_input": 28.832,
+    "ams/temp3_input": 27.923,
+    "pwmfan/pwm1": 15
+   },
+   "power_idle_w": {
+    "mean": 3.4224,
+    "median": 3.36,
+    "std": 0.1238,
+    "max": 3.84,
+    "n": 269
+   },
+   "power_replay_w": {
+    "mean": 3.7809,
+    "median": 3.73,
+    "std": 0.1271,
+    "max": 4.15,
+    "n": 108
+   },
+   "sensors_after": {
+    "ams/temp1_input": 30.293,
+    "ams/temp2_input": 28.925,
+    "ams/temp3_input": 28.389,
+    "pwmfan/pwm1": 15
+   },
+   "eval": {
+    "accuracy_pct": 100.0,
+    "latency_ms": {
+     "median": 0.18,
+     "mean": 0.2,
+     "p90": 0.29,
+     "p99": 0.55,
+     "max": 5.19
+    },
+    "replay_frames_per_s": 1371,
+    "npz": "measurements/nb40_better_latency_round2.npz"
+   }
+  },
+  {
+   "setup": "nb40_own4",
+   "round": 2,
+   "switch": "setup nb40_own4 | input  height: 40  scaling: 64.0  height: 1 | camera \"downsampling\":8 | weights 2d8fac769fbe | server active | app 1",
+   "bitstream_md5": "f8aaa0bda55114290337ddc27ca81496",
+   "weights_md5": "2d8fac769fbe0e55d0144da3d6ba2feb",
+   "fabric_clock_mhz": 100.0,
+   "sensors_before": {
+    "ams/temp1_input": 28.428,
+    "ams/temp2_input": 29.112,
+    "ams/temp3_input": 28.039,
+    "pwmfan/pwm1": 15
+   },
+   "power_idle_w": {
+    "mean": 3.4126,
+    "median": 3.35,
+    "std": 0.1235,
+    "max": 3.99,
+    "n": 268
+   },
+   "power_replay_w": {
+    "mean": 3.7783,
+    "median": 3.74,
+    "std": 0.1255,
+    "max": 4.18,
+    "n": 108
+   },
+   "sensors_after": {
+    "ams/temp1_input": 28.816,
+    "ams/temp2_input": 28.972,
+    "ams/temp3_input": 27.448,
+    "pwmfan/pwm1": 15
+   },
+   "eval": {
+    "accuracy_pct": 100.0,
+    "latency_ms": {
+     "median": 0.18,
+     "mean": 0.2,
+     "p90": 0.29,
+     "p99": 0.55,
+     "max": 2.45
+    },
+    "replay_frames_per_s": 1384,
+    "npz": "measurements/nb40_own4_round2.npz"
+   }
+  },
+  {
+   "setup": "nb40_own4",
+   "round": 3,
+   "switch": "setup nb40_own4 | input  height: 40  scaling: 64.0  height: 1 | camera \"downsampling\":8 | weights 2d8fac769fbe | server active | app 1",
+   "bitstream_md5": "f8aaa0bda55114290337ddc27ca81496",
+   "weights_md5": "2d8fac769fbe0e55d0144da3d6ba2feb",
+   "fabric_clock_mhz": 100.0,
+   "sensors_before": {
+    "ams/temp1_input": 29.562,
+    "ams/temp2_input": 29.422,
+    "ams/temp3_input": 27.697,
+    "pwmfan/pwm1": 15
+   },
+   "power_idle_w": {
+    "mean": 3.4148,
+    "median": 3.35,
+    "std": 0.1261,
+    "max": 3.85,
+    "n": 269
+   },
+   "power_replay_w": {
+    "mean": 3.7736,
+    "median": 3.745,
+    "std": 0.1263,
+    "max": 4.14,
+    "n": 108
+   },
+   "sensors_after": {
+    "ams/temp1_input": 30.588,
+    "ams/temp2_input": 29.158,
+    "ams/temp3_input": 28.187,
+    "pwmfan/pwm1": 15
+   },
+   "eval": {
+    "accuracy_pct": 100.0,
+    "latency_ms": {
+     "median": 0.18,
+     "mean": 0.2,
+     "p90": 0.29,
+     "p99": 0.55,
+     "max": 3.82
+    },
+    "replay_frames_per_s": 1385,
+    "npz": "measurements/nb40_own4_round3.npz"
+   }
+  },
+  {
+   "setup": "nb40_better_latency",
+   "round": 3,
+   "switch": "setup nb40_better_latency | input  height: 40  scaling: 64.0  height: 1 | camera \"downsampling\":8 | weights 2d8fac769fbe | server active | app 1",
+   "bitstream_md5": "76d235275ab130fa412d9023825f2cca",
+   "weights_md5": "2d8fac769fbe0e55d0144da3d6ba2feb",
+   "fabric_clock_mhz": 100.0,
+   "sensors_before": {
+    "ams/temp1_input": 29.438,
+    "ams/temp2_input": 30.137,
+    "ams/temp3_input": 27.798,
+    "pwmfan/pwm1": 15
+   },
+   "power_idle_w": {
+    "mean": 3.4218,
+    "median": 3.36,
+    "std": 0.1298,
+    "max": 4.04,
+    "n": 268
+   },
+   "power_replay_w": {
+    "mean": 3.7791,
+    "median": 3.74,
+    "std": 0.1308,
+    "max": 4.2,
+    "n": 108
+   },
+   "sensors_after": {
+    "ams/temp1_input": 29.811,
+    "ams/temp2_input": 28.847,
+    "ams/temp3_input": 27.806,
+    "pwmfan/pwm1": 15
+   },
+   "eval": {
+    "accuracy_pct": 100.0,
+    "latency_ms": {
+     "median": 0.18,
+     "mean": 0.2,
+     "p90": 0.29,
+     "p99": 0.55,
+     "max": 5.86
+    },
+    "replay_frames_per_s": 1389,
+    "npz": "measurements/nb40_better_latency_round3.npz"
+   }
+  },
+  {
+   "setup": "nb40_less_resources",
+   "round": 3,
+   "switch": "setup nb40_less_resources | input  height: 40  scaling: 64.0  height: 1 | camera \"downsampling\":8 | weights 2d8fac769fbe | server active | app 1",
+   "bitstream_md5": "5db024499a2975c53968f6c7cb66c3f2",
+   "weights_md5": "2d8fac769fbe0e55d0144da3d6ba2feb",
+   "fabric_clock_mhz": 100.0,
+   "sensors_before": {
+    "ams/temp1_input": 28.676,
+    "ams/temp2_input": 29.858,
+    "ams/temp3_input": 28.101,
+    "pwmfan/pwm1": 15
+   },
+   "power_idle_w": {
+    "mean": 3.421,
+    "median": 3.35,
+    "std": 0.1222,
+    "max": 3.82,
+    "n": 268
+   },
+   "power_replay_w": {
+    "mean": 3.7764,
+    "median": 3.735,
+    "std": 0.1292,
+    "max": 4.14,
+    "n": 110
+   },
+   "sensors_after": {
+    "ams/temp1_input": 28.972,
+    "ams/temp2_input": 30.137,
+    "ams/temp3_input": 27.814,
+    "pwmfan/pwm1": 15
+   },
+   "eval": {
+    "accuracy_pct": 100.0,
+    "latency_ms": {
+     "median": 0.18,
+     "mean": 0.2,
+     "p90": 0.29,
+     "p99": 0.55,
+     "max": 2.4
+    },
+    "replay_frames_per_s": 1365,
+    "npz": "measurements/nb40_less_resources_round3.npz"
+   }
+  }
+ ]
+}

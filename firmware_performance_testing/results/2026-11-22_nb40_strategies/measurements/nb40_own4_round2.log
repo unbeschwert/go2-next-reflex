@@ -1,0 +1,22 @@
+loading clips of sessions 22,29,30,33 ...
+65 clips, 40x40 input, 40 empty frames between clips -> 9100 frames to 192.168.77.1:3333
+  25/65 clips, 3s, 1355 frames/s
+  50/65 clips, 5s, 1380 frames/s
+  65/65 clips, 7s, 1384 frames/s
+
+FPGA accuracy 100.0% | per session 22: 100.0%  29: 100.0%  30: 100.0%  33: 100.0%
+trigger rule: ok 100.0% wrong 0.0% missed 0.0% | false trigger on No action 0.0%
+mean output firing rate per class (rows true class, cols outputs):
+  Heart       0.84  0.17  0.18  0.17  0.22
+  Turn left   0.21  0.84  0.19  0.17  0.15
+  Turn right  0.17  0.16  0.89  0.17  0.12
+  Follow me   0.17  0.20  0.18  0.81  0.24
+  No action   0.18  0.18  0.19  0.16  0.81
+confusion (rows true, cols predicted):
+[[15  0  0  0  0]
+ [ 0 15  0  0  0]
+ [ 0  0 15  0  0]
+ [ 0  0  0  5  0]
+ [ 0  0  0  0 15]]
+FPGA latency per frame (ms): median 0.18  mean 0.20  p90 0.29  p99 0.55  max 2.45   (0.0% of frames over the 10 ms frame period)
+saved measurements/nb40_own4_round2.npz

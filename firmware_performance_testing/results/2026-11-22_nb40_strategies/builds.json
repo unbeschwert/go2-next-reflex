@@ -1,0 +1,47 @@
+[
+ {
+  "board_setup": "nb40_own4",
+  "riversdk_job": 28,
+  "job_name": "motion_buddy_v1",
+  "strategy": "faster-generation",
+  "board": "KV260",
+  "prophesee_ip": "GenX320",
+  "weights": "Q2.6",
+  "potentials": "Q4.12",
+  "build_time": "8m 6s",
+  "archive_sha256": "1561f814a6c071f7c6d7ff562b71c30815c7e18b4657209b3ada4150e8b4f0c8",
+  "bitstream_md5": "f8aaa0bda55114290337ddc27ca81496",
+  "dtbo_md5": "0178f006f2717bc00e7a0ad75c00de90",
+  "model": "models/optimised_snn/nb40_model.json"
+ },
+ {
+  "board_setup": "nb40_better_latency",
+  "riversdk_job": 40,
+  "job_name": "nb40-better-latency",
+  "strategy": "better-latency",
+  "board": "KV260",
+  "prophesee_ip": "GenX320",
+  "weights": "Q2.6",
+  "potentials": "Q4.12",
+  "build_time": "9m 2s",
+  "archive_sha256": "03483f4bc1d9703607959f8dd3f7f48360d9559826ae0f329d21fce798a6463c",
+  "bitstream_md5": "76d235275ab130fa412d9023825f2cca",
+  "dtbo_md5": "0178f006f2717bc00e7a0ad75c00de90",
+  "model": "models/optimised_snn/nb40_model.json"
+ },
+ {
+  "board_setup": "nb40_less_resources",
+  "riversdk_job": 42,
+  "job_name": "nb40-less-resources-retry",
+  "strategy": "less-resources",
+  "board": "KV260",
+  "prophesee_ip": "GenX320",
+  "weights": "Q2.6",
+  "potentials": "Q4.12",
+  "build_time": "8m 41s",
+  "archive_sha256": "0695b543a9cdae9dc7f054a0b6e92fda7bda38f512c9393fa325960182153907",
+  "bitstream_md5": "5db024499a2975c53968f6c7cb66c3f2",
+  "dtbo_md5": "0178f006f2717bc00e7a0ad75c00de90",
+  "model": "models/optimised_snn/nb40_model.json"
+ }
+]
