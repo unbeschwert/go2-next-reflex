@@ -81,7 +81,7 @@ You need SSH key access to the server (`ssh user@host` must work without a passw
    - optional data augmentation (`augment:` block, off by default): [doc/data-augmentation.md](../doc/data-augmentation.md)
    - The best epoch is picked by validation accuracy, or the last epochs are averaged (see [Training recipe options](#training-recipe-options)).
 4. **Choose formats** (see below).
-5. **QAT** (skipped with `quant.qat_epochs: 0`). BatchNorm scales that weight decay shrank to ~0 are set to exactly 0, before and during QAT (otherwise QAT turns them into NaN; see [NaN during QAT](#nan-during-qat)). Then quantization-aware fine-tuning with BatchNorm **folded inside** the fake quantization (`prepare_qat(fused_bn=True)`). The network trains on the same rounded and clipped weights the FPGA will run.
+5. **QAT** (skipped with `quant.qat_epochs: 0`). BatchNorm scales that weight decay shrank to ~0 are set to exactly 0, before and during QAT (otherwise QAT turns them into NaN; see [NaN during QAT](#nan-during-qat)). Then quantization-aware fine-tuning with BatchNorm **folded inside** the fake quantization (`prepare_qat(fused_bn=True)`). The network trains on the same rounded and clipped weights the FPGA will run. Each QAT epoch logs validation **and test** accuracy (`test acc`, column `test_acc` in `history.csv`). The kept epoch is still the best on validation, so test is only watched, never used to choose. To add QAT to a finished run: `remote/qat.sh <run> --set quant.qat_epochs=10`.
 6. **Fixed-point check.** Run the folded, quantized model with integer-grid arithmetic (`prepare_ptq`) on validation and test. This is the accuracy to trust. Float, QAT and fixed-point accuracies are all in `metrics.json`.
 7. **Export** to `runs/<run>/deploy/` (below).
 
@@ -90,6 +90,8 @@ The whole dataset is kept on the GPU, so an epoch over ~2,700 clips takes second
 ## Training recipe options
 
 All off by default, so older configs train as before. `configs/motion_buddy_40_v3.yaml` turns them on: our pipeline combined with the training choices of a teammate's v3 notebook.
+
+**Default recipe: `configs/motion_buddy_80_v4.yaml`** (since 2026-11-22). It is the v3 recipe at 80×80 with avg-pool downsampling, 20 epochs (cosine over 15, average of the last 5), and decay on the conv weights only. Network and training are those of the best tested setting: 68.6 / 69.2 % test in 8 bit for two seeds ([doc/training-log.md](../doc/training-log.md) #29/#30). On top it adds speed, zoom/rotation, noise and hot-pixel augmentation (noise scaled to 80×80); cutout stays off. On the board: despot downsampling 4, 80×80 inputs, `scaling` 256 (the export writes it).
 
 | Option | What it does | Why it helps |
 |---|---|---|

@@ -29,8 +29,8 @@ The firmware is generated from `model.json`, a `RiverModelGraph`: nodes, edges b
 The remaining errors are on test person 14, who is small, at the left edge, with a moving distractor. Runs with different seeds differ by up to ~7 test points ([training-log.md](training-log.md) #23/#24).
 
 **Chain-preserving, firmware-safe:**
-1. **Spatial head** (implemented). The output layer keeps a small map, for example 5 × 2 × 2. A class's score is its spike count summed over time *and* positions, which is global sum pooling done in software. Every position uses the same classifier weights, so the head doesn't care where in the frame the gesture is. The old 2×2 → 1×1 k2 head had separate weights per position.
-2. **Anti-aliased downsampling** (implemented). A stride-1 conv followed by average pooling instead of a strided conv, which is smoother and more robust to small shifts (Zhang 2019, *Making Convolutional Networks Shift-Invariant Again*). riverops folds the pool into the conv, so the FPGA runs one conv of kernel `k + pool − 1` and stride `pool`, at the same cost as a strided conv of that size.
+1. **Spatial head** (implemented; tested: no gain, see [Results](#results)). The output layer keeps a small map, for example 5 × 2 × 2. A class's score is its spike count summed over time *and* positions, which is global sum pooling done in software. Every position uses the same classifier weights, so the head doesn't care where in the frame the gesture is. The old 2×2 → 1×1 k2 head had separate weights per position.
+2. **Anti-aliased downsampling** (implemented; tested: **+4.8 test points**, see [Results](#results)). A stride-1 conv followed by average pooling instead of a strided conv, which is smoother and more robust to small shifts (Zhang 2019, *Making Convolutional Networks Shift-Invariant Again*). riverops folds the pool into the conv, so the FPGA runs one conv of kernel `k + pool − 1` and stride `pool`, at the same cost as a strided conv of that size.
 3. **Wider layers** (e.g. 32 channels in layers 0–2): still a chain, about 2× BRAM. Training accuracy under augmentation is 65–70 %, so the network may be capacity-limited.
 
 **Export works, firmware unproven** (a test firmware build comes first, `scripts/firmware_job.py`):
@@ -62,7 +62,16 @@ A layer can have `pool: P` (with `stride: 1`): conv `kernel` with stride 1 → B
 
 ## Results
 
-Comparison on the 80×80 s4 network with the 20-epoch recipe of `configs/optim/adam.yaml`, two seeds each (`configs/arch/`): see [training-log.md](training-log.md), runs #27–#32.
+Comparison on the 80×80 s4 network with the 20-epoch recipe of `configs/optim/adam.yaml`, two seeds each (`configs/arch/`; details in [training-log.md](training-log.md), runs #27–#32). Fixed point, mean of the two seeds:
+
+| Setting | test | person 14 | val | seed spread on test |
+|---|---|---|---|---|
+| baseline (strided convs, 1×1 head) | 64.1 | 52.7 | 73.8 | 7.2 |
+| spatial head | 61.9 | 53.3 | 75.9 | 4.8 |
+| **avg-pool downsampling** | **68.9** | **61.7** | 72.7 | **0.6** |
+| both | 65.1 | 57.2 | 68.8 | 4.7 |
+
+**Avg-pool downsampling is the first change whose gain beats the seed noise.** Both seeds beat both baseline seeds, it's much more stable across seeds, and it costs nothing on the FPGA. The spatial head doesn't help here, and with pooling it makes things worse. Avg-pool on 80×80 is now the default recipe, `training/configs/motion_buddy_80_v4.yaml`. Still open: pooling at 40 epochs and on the 40×40 v3 network.
 
 ## Before deploying any model
 

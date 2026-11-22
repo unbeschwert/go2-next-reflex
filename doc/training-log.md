@@ -51,6 +51,14 @@ Val / test accuracy in %. Unless noted: batch 32, constant lr 3e-3, weight decay
 | 24 | `optim-adam-seed43` | 11-22 04:26 | = #23 | = #23, **seed 43** | = #23 | = #14 | 77.6 / 59.6 | 76.6 / 59.5 |
 | 25 | `optim-adamw-1e-2` | 11-22 04:26 | = #23 | = #23 with AdamW 1e-2 | = #23 | = #14 | 73.1 / 67.4 | 73.9 / 65.8 |
 | 26 | `optim-adamw-1e-1` | 11-22 04:26 | = #23 | = #23 with AdamW 1e-1 | = #23 | = #14 | 72.9 / 67.2 | 72.9 / 69.0 |
+| 27 | `arch-head` | 11-22 07:18 | 80×80 s4 + **spatial head** (5×2×2 output, k1) | = #23 (BatchNorm recomputed) | = #23 | = #14 | 75.8 / 64.9 | 75.4 / 64.3 |
+| 28 | `arch-head-seed43` | 11-22 07:18 | = #27, seed 43 | = #27 | = #23 | = #14 | 75.4 / 62.9 | 76.4 / 59.5 |
+| 29 | `arch-pool` | 11-22 07:18 | 80×80 s4 with **avg-pool downsampling** (k5+pool4, k5+pool2 ×2) | = #27 | = #23 | = #14 | 69.6 / 71.5 | 68.8 / 68.6 |
+| 30 | `arch-pool-s43` | 11-22 08:49 | = #29, seed 43 | = #27 | = #23 | = #14 | 76.4 / 66.5 | 76.6 / 69.2 |
+| 31 | `arch-head-pool` | 11-22 07:19 | both | = #27 | = #23 | = #14 | 64.9 / 64.1 | 66.1 / 62.7 |
+| 32 | `arch-head-pool-s43` | 11-22 08:49 | both, seed 43 | = #27 | = #23 | = #14 | 72.5 / 70.8 | 71.5 / 67.4 |
+| 33 | `motion-buddy-40-v3-qat10` | 11-22 | = #14 | = #14 | = #14 | = #14 + **10 QAT epochs**, test logged per epoch | 71.5 / 76.8 | 77.4 / 71.0 |
+| 34 | **`motion-buddy-80-v4`** (default recipe) | 11-22 10:28 | = #29 (80×80, avg-pool) | = #29 | #29's set + **speed, zoom/rotation, noise, hot pixels** | = #14 (Q1.7, k [2, 1, 1, 1, 2]) | 73.9 / 72.6 | 74.9 / 72.4 |
 
 Rows 3, 10–13 and 15 re-quantize an existing float model with `remote/qat.sh`, so their float numbers are those of the run they start from.
 
@@ -91,6 +99,14 @@ What each augmentation does: [data-augmentation.md](data-augmentation.md).
 | #24 `optim-adam-seed43` | 74.5 | 78.9 | 70.3 | 48.7 | sit P14 0 %, hello P14 18 % |
 | #25 `optim-adamw-1e-2` | 69.4 | 78.9 | 74.3 | 57.3 | sit P14 37 %, hello 33–41 % |
 | #26 `optim-adamw-1e-1` | 71.8 | 74.1 | 76.1 | 62.0 | sit P14 12 % |
+| #27 `arch-head` | 72.9 | 78.0 | 72.5 | 56.3 | sit P14 8 % |
+| #28 `arch-head-seed43` | 69.4 | 84.1 | 68.8 | 50.2 | sit P14 15 %, dance 39–41 % |
+| #29 `arch-pool` | 67.8 | 69.8 | 77.9 | 59.5 | sit P14 17 %, hello P14 26 % |
+| #30 `arch-pool-s43` | 71.0 | 82.8 | 74.6 | 63.8 | sit P14 29 %, dance P13 47 % |
+| #31 `arch-head-pool` | 67.1 | 65.1 | 70.7 | 54.8 | sit P14 19 % |
+| #32 `arch-head-pool-s43` | 68.2 | 75.0 | 75.4 | 59.5 | sit P14 4 % |
+| #33 `motion-buddy-40-v3-qat10` | 77.6 | 77.2 | 81.5 | 60.6 | hello P14 16 %, sit P14 40 % |
+| #34 `motion-buddy-80-v4` | 70.6 | 79.7 | 82.6 | 62.4 | hello P14 25 % (32 test hello clips → sit), dance P14 50 % |
 
 `scripts/eval_per_person.py runs/<run>` prints this plus the per-class recall and confusion matrix. For #9 in float: P13 78 %, P14 62 %, dance recall 93 %, sit weak for P14.
 
@@ -138,6 +154,30 @@ Measured on #23–#26 with `scripts/recompute_bn.py` (same averaged weights, onl
 Test improves in all four (+0.1 to +1.1), val moves ±2 points either way. Because the weights are identical, this is a paired comparison without the seed noise: a small but consistent gain, as expected with a learning rate at its floor over the averaged epochs.
 
 Applied to the deployment candidate #14 (40×40 v3, average of 10 epochs; copy `motion-buddy-40-v3-bn`): fixed point 71.9 / 75.3 → **69.2 / 75.1**, float 71.5 / 76.8 → 71.7 / 75.1. No gain here (test −0.2, val −2.7), so across five runs the effect is about ±1 point on test: the correct method, but not a measurable accuracy change. #14 keeps its original export.
+
+**#27–#32: spatial head and avg-pool downsampling** ([architecture-options.md](architecture-options.md)), two seeds each, against the same recipe without them (#23/#24 with recomputed BatchNorm, `optim-adam*-bn`). Fixed point, test in %:
+
+| Setting | seed 42 | seed 43 | mean | person 14 (mean) | val (mean) |
+|---|---|---|---|---|---|
+| baseline (#23/#24) | 67.7 | 60.5 | 64.1 | 52.7 | 73.8 |
+| spatial head (#27/#28) | 64.3 | 59.5 | 61.9 | 53.3 | 75.9 |
+| **avg-pool (#29/#30)** | 68.6 | 69.2 | **68.9** | **61.7** | 72.7 |
+| both (#31/#32) | 62.7 | 67.4 | 65.1 | 57.2 | 68.8 |
+
+- **Avg-pool downsampling helps:** both seeds beat both baseline seeds on test (+4.8 points on the mean, +9 on person 14), and the two seeds are 0.6 points apart instead of 7.2. It's the only change so far whose gain is larger than the seed spread. Val is about the same. It costs nothing on the FPGA (same layer count, the first conv is k8 instead of k7: +480 weights) but needs ~19 GB GPU memory per 80×80 run instead of ~11 GB (the first conv runs at stride 1 on 80×80), so only 3–4 runs fit on the A100 at once.
+- **The spatial head doesn't:** val goes up 2 points, test down 2. Summing over the 2×2 positions also sums the distractor's activity into the scores, which may cancel the benefit of position-independent weights. Combined with pooling it is worse than pooling alone.
+- *Sit* for person 14 stays the weak spot in all of them (4–29 %).
+
+**#33: 10 QAT epochs on #14, with test logged after every epoch.** Validation chose epoch 5, and the fixed-point result is **77.4 / 71.0** (#14 without QAT: 71.9 / 75.3). Per epoch (QAT model, val / test in %):
+
+| QAT epoch | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| val | 72.9 | 71.0 | 76.4 | 73.5 | **77.4** | 73.9 | 76.0 | 74.7 | 73.3 | 76.2 |
+| test | 76.2 | 76.6 | 71.7 | 72.3 | 72.3 | 72.1 | 72.6 | 74.1 | 75.3 | 71.7 |
+
+The first two QAT epochs lift test above #14 (76.2, 76.6), but from epoch 3 on val and test move in opposite directions: QAT fine-tunes towards the validation people, and selecting the epoch on val makes that worse (the chosen epoch is 4 points below #14 on test, mostly person 14: 66.3 → 60.6). This is why QAT kept losing on test (#11, #15, #33). If QAT is used, it should be short and not selected on val (e.g. a fixed 1–2 epochs, or the average of the QAT epochs); picking the epoch on test is not an option, as test would then no longer be an unbiased estimate.
+
+**#34: the default recipe `motion_buddy_80_v4` (80×80, avg-pool, 20 epochs) with speed, zoom/rotation, noise and hot pixels added.** Fixed point 74.9 / **72.4** %, against 68.8 / 68.6 % for the same seed without the four augmentations (#29): +3.8 test, +6.1 val, person 14 59.5 → 62.4 %. One seed, so the gain is suggestive, not proven. The first 80×80 model with an automatic, matching firmware: job **#45** (built from the config's model.json before training ended, Q1.7 / Q4.12, KV260, GenX320, less resources; the run's exported model.json is byte-identical). Board: despot downsampling 4, inputs 80×80, `scaling: 256`, 5×1×1 outputs.
 
 ## Open questions and next runs
 

@@ -1,0 +1,32 @@
+# Default recipe (2026-11-22): 80x80 input, v3 network with avg-pool downsampling, 20 epochs.
+# Network and training as configs/arch/pool.yaml, the best tested setting (doc/training-log.md #29/#30:
+# 68.6 / 69.2 % test in 8 bit for two seeds, vs 67.7 / 60.5 % with strided convs), plus speed,
+# zoom/rotation, noise and hot-pixel augmentation (untested in this combination).
+# Board: despot downsampling 4, spleat-server inputs 80x80, scaling 256 (written by the export).
+base: motion_buddy_80_v3_s4.yaml
+name: motion_buddy_80_v4
+
+model:
+  layers:                      # 80 → 19 → 19 → 9 → 2 → 1; FPGA kernels k8 s4, k3, k6 s2, k6 s2, k2
+    - {out: 16, kernel: 5, padding: 1, pool: 4}
+    - {out: 16, kernel: 3, stride: 1, padding: 1}
+    - {out: 16, kernel: 5, padding: 2, pool: 2}
+    - {out: 128, kernel: 5, padding: 0, pool: 2}
+    - {out: classes, kernel: 2}
+
+train:
+  epochs: 20
+  average_last: 5              # cosine lr over epochs 1-15, then the average of epochs 16-20
+  optimizer: adam
+  weight_decay: 0.0001
+  decay_on: conv_weights       # no decay on BatchNorm or the leaks
+
+# On top of the v3 augmentations (dropout, time shift, flip, rate, polarity, warm start, mixup).
+# These four were off only because the v3 recipe didn't use them; their earlier tests were single
+# seeds within the seed noise (doc/training-log.md). Cutout stays off: it can erase a small,
+# off-centre person (test person 14) completely, and it was never tested on its own.
+augment:
+  speed:      {p: 0.5, range: [0.8, 1.25]}                  # people gesture slower / faster
+  affine:     {p: 0.5, scale: [0.8, 1.2], rotate_deg: 10}   # distance to the camera, camera tilt
+  noise:      {p: 0.5, max_rate: 0.075}                     # background events; 0.3 at 40x40, a pixel here covers 1/4 of the area
+  hot_pixels: {p: 0.3, max_count: 2, rate: [2, 20]}         # one sensor pixel → one pixel at any size, same rate as at 40x40

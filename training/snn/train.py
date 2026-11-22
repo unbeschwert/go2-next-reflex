@@ -226,9 +226,12 @@ def recompute_bn(model, data: SplitData, cfg: Config, augment: bool = True) -> i
 
 def fit(model, train: SplitData, val: SplitData, cfg: Config, *, epochs: int, lr: float, phase: str,
         clamp: float | None, history: list, run_dir: Path, augment: bool = True, after_step=None,
-        schedule=None, average_last: int = 0):
+        schedule=None, average_last: int = 0, test: SplitData | None = None):
     """Train; return the model with the best validation accuracy, or with average_last > 0 the average
-    of the weights of the last average_last epochs (no selection on validation)."""
+    of the weights of the last average_last epochs (no selection on validation).
+
+    test: also evaluate the test split after every epoch, for the log and history only. It never
+    influences which epoch is kept (that is validation's job), so test stays an unbiased estimate."""
     optimizer = make_optimizer(model, lr, cfg)
     print(f"[{phase}] {describe_optimizer(optimizer)}", flush=True)
     best_acc, best_state = -1.0, copy.deepcopy(model.state_dict())
@@ -240,6 +243,7 @@ def fit(model, train: SplitData, val: SplitData, cfg: Config, *, epochs: int, lr
                 group["lr"] = schedule(epoch)
         tr = run_epoch(model, train, cfg, optimizer, clamp, augment=augment, after_step=after_step)
         va = run_epoch(model, val, cfg)
+        te = run_epoch(model, test, cfg) if test is not None else None
         improved = va["acc"] > best_acc
         if improved:
             best_acc, best_state = va["acc"], copy.deepcopy(model.state_dict())
@@ -254,11 +258,13 @@ def fit(model, train: SplitData, val: SplitData, cfg: Config, *, epochs: int, lr
         history.append({"phase": phase, "epoch": epoch, "lr": optimizer.param_groups[0]["lr"],
                         "train_loss": tr["loss"], "train_acc": tr["acc"],
                         "val_loss": va["loss"], "val_acc": va["acc"], "val_spikes": va["spikes"],
+                        **({"test_acc": te["acc"]} if te else {}),
                         "seconds": time.time() - start})
+        test_text = f"test acc {te['acc']:.1%}  " if te else ""
         print(f"[{phase}] epoch {epoch:3d}/{epochs}  lr {optimizer.param_groups[0]['lr']:.2e}  "
               f"train loss {tr['loss']:.4f} acc {tr['acc']:.1%}  "
-              f"val loss {va['loss']:.4f} acc {va['acc']:.1%} spikes {va['spikes']:.1f}  ({time.time() - start:.0f}s)"
-              f"{'  *best' if improved else ''}", flush=True)
+              f"val loss {va['loss']:.4f} acc {va['acc']:.1%} spikes {va['spikes']:.1f}  "
+              f"{test_text}({time.time() - start:.0f}s){'  *best' if improved else ''}", flush=True)
         write_history(history, run_dir)
     if average is not None:
         reference = model.state_dict()
@@ -393,6 +399,7 @@ def quantize(model, cfg: Config, splits: dict, run_dir: Path, history: list) -> 
     if cfg.quant.qat_epochs:
         qat, _ = fit(qat, splits["train"], splits["val"], cfg, epochs=cfg.quant.qat_epochs, lr=cfg.quant.qat_lr,
                      phase="qat", clamp=None, history=history, run_dir=run_dir, augment=cfg.augment.qat,
+                     test=splits["test"],
                      after_step=lambda: zero_tiny_gammas(qat))
     save_checkpoint(run_dir / "qat_best.pt", qat, cfg, formats, "qat")
     qat_val, qat_test = run_epoch(qat, splits["val"], cfg), run_epoch(qat, splits["test"], cfg)
