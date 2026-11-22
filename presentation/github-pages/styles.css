@@ -144,6 +144,11 @@ h1 em { font-style: normal; color: var(--yellow); }
 .demo-media-grid video, .demo-media-grid img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: contain; background: #101319; border: 1px solid var(--dark-line); }
 .demo-media-grid figcaption { display: grid; gap: 5px; margin-top: 12px; line-height: 1.5; }
 .demo-media-grid figcaption span { color: var(--muted); }
+.demo-subheading { margin-top: 42px; font-size: clamp(1.45rem, 3vw, 2rem); }
+.demo-subheading + .demo-media-grid { margin-top: 18px; }
+.team { border-top: 1px solid var(--dark-line); background: #1b1e25; }
+.team-members { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 14px 24px; margin: 26px 0 0; padding: 20px 0 0; border-top: 1px solid var(--dark-line); list-style: none; line-height: 1.5; }
+.team-members li { font-weight: 700; }
 .site-footer { border-top: 1px solid var(--dark-line); }
 .footer-inner { min-height: 86px; padding-block: 15px; }
 
