@@ -123,9 +123,11 @@ h1 em { font-style: normal; color: var(--yellow); }
 .scoreline dt { color: var(--secondary); font-size: .9375rem; line-height: 1.35; }
 .scoreline dd { margin: 0; line-height: 1; font-weight: 800; font-size: clamp(2rem, 4vw, 4.1rem); letter-spacing: -.07em; white-space: nowrap; }
 .scoreline small { font-size: .56em; letter-spacing: -.045em; }
+.motion-buddy-result { margin-bottom: 26px; max-width: 950px; color: var(--secondary); }
+.motion-buddy-result strong { color: var(--ink); }
 .benchmark { margin: 0; border: 1px solid var(--light-line); padding: clamp(18px, 3vw, 34px); }
 .benchmark-intro { display: flex; justify-content: space-between; align-items: center; gap: 18px; }
-.benchmark-controls { display: flex; gap: 3px; border: 1px solid var(--light-line); border-radius: 5px; padding: 3px; }
+.benchmark-controls { display: flex; flex-wrap: wrap; gap: 3px; border: 1px solid var(--light-line); border-radius: 5px; padding: 3px; }
 .benchmark-controls button { min-height: 36px; background: transparent; color: var(--ink); font-size: .9375rem; padding: 5px 10px; font-weight: 700; white-space: nowrap; border: none; border-radius: 3px; cursor: pointer; }
 .benchmark-controls button[aria-pressed='true'] { background: var(--ink); color: var(--paper); }
 .benchmark-controls button[aria-pressed='true']:focus-visible { outline-color: var(--ink); }
@@ -136,6 +138,12 @@ h1 em { font-style: normal; color: var(--yellow); }
 .bar-accent { background: #597d19; }
 .bar-row strong { font-variant-numeric: tabular-nums; text-align: right; }
 .benchmark-note { margin-top: 18px; color: var(--secondary); }
+.demo-media { border-bottom: 1px solid var(--dark-line); background: #1b1e25; }
+.demo-media-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 28px; }
+.demo-media-grid figure { margin: 0; min-width: 0; }
+.demo-media-grid video, .demo-media-grid img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: contain; background: #101319; border: 1px solid var(--dark-line); }
+.demo-media-grid figcaption { display: grid; gap: 5px; margin-top: 12px; line-height: 1.5; }
+.demo-media-grid figcaption span { color: var(--muted); }
 .site-footer { border-top: 1px solid var(--dark-line); }
 .footer-inner { min-height: 86px; padding-block: 15px; }
 
@@ -178,6 +186,7 @@ h1 em { font-style: normal; color: var(--yellow); }
   .bar-row strong { grid-column: 2; grid-row: 1; }
   .footer-inner { align-items: start; flex-direction: column; gap: 15px; padding-block: 25px; }
   .clip-grid { margin-top: 20px; gap: 16px 12px; }
+  .demo-media-grid { grid-template-columns: 1fr; gap: 24px; }
   .heart-layout { grid-template-columns: 1fr; gap: 22px; }
 }
 
