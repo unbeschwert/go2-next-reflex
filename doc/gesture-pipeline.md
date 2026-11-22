@@ -64,8 +64,9 @@ ssh root@192.168.77.1 'systemctl stop spleat-server; xmutil unloadapp; xmutil lo
 ```
 
 Back up the original `/root/weights.txt` and `/usr/lib/firmware/xilinx/spleat/` first.
-`config.yaml` and `metavision_camera.json` stay as shipped (2×80×80 in, 5 out, scaling 4096,
-100 Hz, downsampling 4) - they match `best_model.json`.
+`config.yaml` and `metavision_camera.json` stay as shipped (2×80×80 in, 5 out, 100 Hz,
+downsampling 4) - they match `best_model.json` - except `scaling`: despot sends block sums, so
+it must be 4096 / downsampling² (256 here, 64 for 40×40), see [deploy-model.md](deploy-model.md).
 
 **Firmware and weights must belong together.** The shipped firmware uses 8-bit weights
 (−128…127); the best-model firmware expects the 16-bit `best_model_parameters` (−15894…11041).

@@ -11,8 +11,16 @@
 # --headless : camera feeds the FPGA without drawing on the board's screen
 #              (no camera view in RViz, but less CPU).
 # ROS 2 settings come from /root/laptop_link.sh (test domain 42, eth0 -> laptop).
+#
+# Which classes the weights in /root/weights.txt were trained on, read from /root/model_classes:
+#   own     = our gestures: heart / turn left 360 / turn right 360 (go2_viz/gestures.json)
+#   dataset = organisers' Motion Buddy classes: sit / lay down / hello / dance (default)
+# Write that file whenever weights.txt is swapped, e.g.  echo own > /root/model_classes
+# (bridge actions and viewer labels follow it).
 
 source /root/laptop_link.sh
+CLASSES=$(cat /root/model_classes 2>/dev/null || echo dataset)
+case "$CLASSES" in own|dataset) ;; *) echo "bad /root/model_classes '$CLASSES' (own|dataset)"; exit 1 ;; esac
 
 killp() {  # BusyBox has no pkill
   for p in $(ps | grep "$1" | grep -v grep | awk '{print $1}'); do kill "$p" 2>/dev/null; done
@@ -29,6 +37,7 @@ stop_all() {
 status() {
   echo "FPGA app : $(xmutil listapps 2>/dev/null | grep -q '0->0' && echo 'spleat loaded' || echo 'NOT loaded')"
   echo "SNN srv  : $(systemctl is-active spleat-server.service)"
+  echo "weights  : $(md5sum /root/weights.txt | cut -c1-12)  classes: $CLASSES"
   for p in despot_send_and_forget live_gesture_bridge.py board_screen_pub.py; do
     printf '%-9s: %s\n' "${p%%.*}" "$(ps | grep "$p" | grep -v grep >/dev/null && echo running || echo stopped)" | sed 's/despot_send_and_forget/camera  /;s/live_gesture_bridge/bridge  /;s/board_screen_pub/screen  /'
   done
@@ -57,10 +66,12 @@ case "${1:-status}" in
       setsid nohup python3 /root/board_screen_pub.py > /tmp/screenpub.log 2>&1 < /dev/null &
     fi
     sleep 3
-    setsid nohup python3 /root/live_gesture_bridge.py --host 127.0.0.1 > /tmp/bridge.log 2>&1 < /dev/null &
-    # browser view of SNN input + outputs: http://192.168.77.1:8080 (passive, keeps running)
-    ps | grep snn_input_viewer.py | grep -v grep >/dev/null || \
-      setsid nohup python3 /root/snn_input_viewer.py 8080 > /tmp/snnview.log 2>&1 < /dev/null &
+    setsid nohup python3 /root/live_gesture_bridge.py --host 127.0.0.1 --classes "$CLASSES" \
+      > /tmp/bridge.log 2>&1 < /dev/null &
+    # browser view of SNN input + outputs: http://192.168.77.1:8080 (passive, keeps running;
+    # restarted here so its labels match the classes of the current weights)
+    killp snn_input_viewer.py
+    setsid nohup python3 /root/snn_input_viewer.py 8080 "$CLASSES" > /tmp/snnview.log 2>&1 < /dev/null &
     sleep 4
     status
     echo "camera view: http://192.168.77.1:8080"
@@ -83,7 +94,7 @@ case "${1:-status}" in
       setsid nohup ros2 run obstacle_detection obstacle_detection > /tmp/obstacle.log 2>&1 < /dev/null &
       sleep 2
       setsid nohup python3 /root/live_gesture_bridge.py --host 127.0.0.1 --require-clear --no-viz \
-        ${2:+$2} > /tmp/bridge.log 2>&1 < /dev/null &
+        --classes "$CLASSES" ${2:+$2} > /tmp/bridge.log 2>&1 < /dev/null &
     )
     sleep 6
     status
