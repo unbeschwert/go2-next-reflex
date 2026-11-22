@@ -194,8 +194,9 @@ class TrainConfig:
     # the single epoch with the best validation accuracy (0 = best epoch, as before).
     average_last: int = 0
     # adam: weight decay added to the gradient (as the reference notebook), every parameter.
-    # adamw: decoupled decay, conv weights only (not BatchNorm, biases or the learnable leak);
-    # needs a larger weight_decay (~1e-2) for a similar effect.
+    # adamw: decoupled decay, conv weights only (not BatchNorm, biases or the learnable leak).
+    # Not equivalent strengths: Adam's 1e-4 is divided by the (small) gradient, so it matched AdamW 1e-2
+    # in layers 0-1 but was ~15x stronger in layer 3 (doc/training-log.md, run #21).
     optimizer: str = "adam"
     # mse: spike counts to target_high/target_low * T (the notebook). ce: cross-entropy on counts /
     # ce_temperature. ce+mse: both, MSE weighted by ce_mse_weight (keeps the counts in the 20-80 % range).

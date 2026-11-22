@@ -44,6 +44,9 @@ Val / test accuracy in %. Unless noted: batch 32, constant lr 3e-3, weight decay
 | 17 | `e10-40-v3` | 11-22 00:04 | v3 | **10 epochs**, cosine over 7, average of last 3 | v3 set | = #14 | 72.3 / 55.1 | 69.0 / 55.9 |
 | 18 | `e10-80-v3-s4` | 11-22 00:05 | v3 at **80×80**, first layer k7 s4 (80→19) | = #17 | v3 set, ±8 px | = #14 | 71.0 / 62.0 | 70.6 / 58.2 |
 | 19 | `e10-80-v3-deep` | 11-22 00:07 | v3 at **80×80** + 16-ch k4 s2 layer in front (80→40) | = #17 | v3 set, ±8 px | = #14 | 67.6 / 59.8 | 67.4 / 59.8 |
+| 20 | `motion-buddy-80-v3-s4` | 11-22 00:39 | v3 at **80×80**, first layer k7 s4 | = #14 (40 epochs) | v3 set, ±8 px | = #14 | 78.6 / 74.4 | 78.4 / 72.6 |
+| 21 | `motion-buddy-80-v3-s4-adamw` | 11-22 00:42 | = #20 | = #20 with **AdamW**, weight decay 1e-2 on conv weights only | = #20 | = #14 | 80.1 / 64.7 | 78.6 / 67.7 |
+| 22 | `motion-buddy-80-v3-s4-ce` | 11-22 00:48 | = #20 | = #20 with **loss ce+mse** (τ 10, MSE weight 1) | = #20 | = #14 | 77.6 / 69.5 | 76.8 / 69.4 |
 
 Rows 3, 10–13 and 15 re-quantize an existing float model with `remote/qat.sh`, so their float numbers are those of the run they start from.
 
@@ -77,6 +80,9 @@ What each augmentation does: [data-augmentation.md](data-augmentation.md).
 | #17 `e10-40-v3` | 70.2 | 67.7 | 68.1 | 43.7 | sit P14 19 %, no-action P14 25 % |
 | #18 `e10-80-v3-s4` | 65.9 | 75.9 | 65.9 | 50.5 | dance (P13 42 %, P14 31 %), sit P14 35 %, hello P14 26 % |
 | #19 `e10-80-v3-deep` | 68.6 | 65.9 | 65.9 | 53.8 | sit collapsed (P13 29 %, P14 0 %, P12 6 %) |
+| #20 `motion-buddy-80-v3-s4` | 77.6 | 79.3 | 83.3 | 62.0 | sit P14 35 % (28 test sit clips → dance), hello P14 39 % |
+| #21 `motion-buddy-80-v3-s4-adamw` | 76.5 | 81.0 | 78.3 | 57.3 | no-action (P13 57 %, P14 55 %; 50 test clips → sit), sit P14 31 % |
+| #22 `motion-buddy-80-v3-s4-ce` | 75.7 | 78.0 | 81.2 | 57.7 | sit predicted too often (99 of 555 test clips wrongly → sit), hello P14 30 % |
 
 `scripts/eval_per_person.py runs/<run>` prints this plus the per-class recall and confusion matrix. For #9 in float: P13 78 %, P14 62 %, dance recall 93 %, sit weak for P14.
 
@@ -97,6 +103,14 @@ What each augmentation does: [data-augmentation.md](data-augmentation.md).
 **#16: zoom/rotation on the v3 net: better val, slightly lower test.** Val +7.4 (79.3 vs 71.9), test −2.9 (72.4 vs 75.3), which is close to the noise level. It moves errors between classes: test hello 36 → 47 % (P14 23 → 33 %), test dance 71 → 54 % (now often predicted as sit). No 8-bit loss (float and fixed point both 72.4 % test). Train accuracy stayed at 65–71 % and val was still rising in the last epochs, so with zoom on, 40 epochs is probably too short. Next: the same config with more epochs.
 
 **#17–#19: 80×80 input, 10-epoch comparison.** Same recipe, only the input size and the first layers differ, and all three are undertrained, so compare them only with each other. Test (fixed point) went 55.9 % at 40×40 → 58.2 % (k7 s4) and 59.8 % (deep). Person 14, the small off-centre subject, gained the most: 43.7 → 50.5 → 53.8 %. Val stayed about the same (69–71 %). The gain is consistent across both 80×80 variants but within 2–4 points of noise on test, so it needs the full 40-epoch runs. The deep variant had not learnt *sit* yet at epoch 10 (0 % for P14); it starts slower. k7 s4 lost 3.8 test points in 8-bit (62.0 float → 58.2 fixed), more than the others. With three runs sharing the GPU, an epoch took ~155 s (40×40 and k7 s4) and ~185 s (deep).
+
+**#20: 80×80 at 40 epochs did not confirm the 10-epoch gain.** Compared with #14 (same recipe at 40×40), val went up 6.5 points (78.4 vs 71.9) and test went down 2.7 (72.6 vs 75.3). Person 14 went down too (62.0 vs 66.3), the opposite of the 10-epoch hint (#18). Hello on test improved (36 → 50 %), sit for person 14 got worse (60 → 35 %, mostly predicted as dance). The 8-bit loss was 1.8 points (74.4 float). With one seed per config and 2 test people, 40×40 and 80×80 are roughly equal; 80×80 costs ~4× the input events on the FPGA for no clear gain.
+
+**#21: AdamW (wd 1e-2, conv weights only) is worse on test.** Same val as Adam (#20: 78.6 vs 78.4) but test 67.7 vs 72.6, float test 64.7 vs 74.4. The new error is no-action predicted as sit (50 of 120 test clips). It trained without NaN problems. Measured afterwards (gradients on 40 augmented training batches, at the trained weights): Adam's L2 decay of 1e-4 is divided by the small per-weight gradient, so on the conv weights it acts about as strongly as AdamW 1e-2 in layers 0–1, but 3–4× stronger in layers 2 and 4 and ~15× stronger in layer 3. So AdamW 1e-2 was the *weaker* regularizer, and layer 3's conv weights ended twice as large (median |w| 0.082 vs 0.037). On the leaks and BatchNorm the L2 term is under 1 % of the gradient, so excluding them from the decay changed little; the different τ values (layer 3: 4.1 vs 2.8) are a different training path, not a missing pull towards τ = 2. A fair comparison needs an AdamW decay that matches Adam's on layer 3 (~1e-1).
+
+**#22: cross-entropy + MSE is worse on test than MSE alone.** Test 69.4 vs 72.6 (#20), val 76.8 vs 78.4. It learnt faster in the first 10 epochs (76.8 % val at epoch 9 vs 66.1 %) but ended lower, and it predicts *sit* too often: 99 test clips of other classes go to sit (dance 36, hello 34, no-action 29). 8-bit cost nothing (69.5 float). Not tried: a higher temperature or a smaller CE weight.
+
+**Summary of #20–#22:** on the 80×80 s4 network, the notebook's Adam + MSE is the best of the three. None of these beat the 40×40 v3 (#14) on test.
 
 Assumptions in #14 (the notebook isn't in the repo): dropout after layers 1–3, the augmentation probabilities, mixup α 0.4, cosine over the first 30 epochs.
 
