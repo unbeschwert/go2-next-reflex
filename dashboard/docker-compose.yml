@@ -1,0 +1,24 @@
+# docker compose up -d --build     ->  http://127.0.0.1:8800
+# Host networking: the board is on the laptop's Ethernet (192.168.77.1) and the dashboard stays on loopback.
+services:
+  dashboard:
+    build: .
+    image: durance-dashboard:1.0.0
+    network_mode: host
+    user: "1000:1000"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    environment:
+      DD_CONFIG: /config/config.toml
+    volumes:
+      - ./docker/config.container.toml:/config/config.toml:ro
+      - ${HOME}/.ssh:/home/durance/.ssh:ro            # keys + known_hosts (read-only)
+      - ..:/project                                     # the folder above dashboard/: the repository (kria/, ros2/,
+                                                        # training/, models/) or ~/go2-hackathon (go2_viz/, models/)
+      - ${HOME}/river-captures:/captures
+      - durance-state:/state                           # users, audit log, SSH control sockets
+volumes:
+  durance-state:

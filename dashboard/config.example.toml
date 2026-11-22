@@ -1,0 +1,48 @@
+# Durance AI dashboard configuration. Copy to ~/.config/durance-dashboard/config.toml (or point DD_CONFIG at it).
+# Every key is optional: the defaults below are what the dashboard uses when a key is missing.
+
+[server]
+host = "127.0.0.1"          # loopback only. Anything else also needs allow_lan = true (and HTTPS in front).
+port = 8800
+allow_lan = false
+session_hours = 8.0
+secure_cookie = false       # true when served through an HTTPS reverse proxy
+
+[paths]
+# Where the board / ROS / training files are: found by themselves. Inside the team repository the dashboard
+# uses kria/, ros2/rviz/, ros2/, training/optimised_snn/ (+ dataset/) and models/ next to its own folder;
+# in the laptop layout (~/go2-hackathon) it uses go2_viz/, laptop_ws/ and models/. Set these only to override.
+# repo = "~/go2-next-reflex"                 # repository checkout (default: the folder above dashboard/)
+# go2_viz = "~/go2-hackathon/go2_viz"        # laptop layout: scripts, gestures.json, bridge_settings.py, go2.urdf
+# models = "<repo>/models"                    # weights: optimised_snn/<classes>/, board_ready/, fetched/<run>/
+# laptop_env = "<repo>/ros2/env.sh"
+# board_link_env = "<repo>/ros2/env_board_link.sh"
+riverops = "~/go2-hackathon/riverops-src/riverops"   # riverops package folder, copied to training machines
+organisers_zip = "~/Downloads/durance-ai-handgesture-recognition (1).zip"   # the Durance AI team's dataset
+data = "~/go2-hackathon/data"                 # editable dataset folder (sessions NN/gesture_*.bin)
+share = "~/go2-hackathon/share"               # dataset zips (read-only in the dashboard)
+captures = "~/river-captures"                 # raw recordings
+state = "~/.local/share/durance-dashboard"    # users, audit log, simulator cache, logs (mode 0700)
+recorder_python = "~/.local/share/uv/tools/river-tools/bin/python"
+ros_python = "/usr/bin/python3"
+
+[board]
+host = "192.168.77.1"
+user = "root"
+ssh_port = 22
+control_path = "~/.ssh/cm-durance-board-%C"
+viewer_port = 8080           # snn_input_viewer.py on the board (reached through an SSH tunnel)
+local_viewer_port = 18080
+
+[robot]
+max_vx = 0.5                 # m/s   manual-control limits (also enforced on the board)
+max_vy = 0.3
+max_wz = 1.0                 # rad/s
+deadman_s = 0.4              # the robot stops when no move command arrives for this long
+
+[sim]
+ros_domain = 88              # isolated loopback domain (never 0 = robot or 42 = board link)
+sim_session = "29"
+# weights = ""               # relative to paths.models; "" = the own-gesture nb40 model (md5 056ee113)
+
+# Training machines are not configured here: see README "Training" (private clusters.toml).

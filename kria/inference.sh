@@ -81,17 +81,27 @@ case "${1:-status}" in
     # (domain 0, USB-Ethernet adapter) with the LiDAR obstacle check enabled.
     #   /root/inference.sh robot --dry-run   decide + log only, robot never commanded
     #   /root/inference.sh robot             live: gestures move the robot
+    if [ ! -f /root/robot_link.sh ]; then   # without it the bridge stays on the laptop domain (42)
+      echo "/root/robot_link.sh missing - copy kria/robot_link.sh to the board"; exit 1
+    fi
     if ! ping -c 1 -W 1 192.168.123.161 >/dev/null 2>&1; then
       echo "Go2 not reachable at 192.168.123.161 - check USB-Ethernet adapter + cable"; exit 1
     fi
     ps | grep despot_send_and_forget | grep -v grep >/dev/null || { echo "camera feed not running - run '$0 start' first"; exit 1; }
     killp live_gesture_bridge.py
     killp board_screen_pub.py
-    killp "obstacle_dete"; killp "ros2 run obstacle"
+    killp "obstacle_dete"; killp "ros2 run obstacle"; killp obstacle_light.py
     sleep 1
     (
       source /root/robot_link.sh
-      setsid nohup ros2 run obstacle_detection obstacle_detection > /tmp/obstacle.log 2>&1 < /dev/null &
+      # max_height 1.0: the Go2 height map holds 3.6-3.9 m noise right behind the robot (a wire there);
+      # with the default 4.0 that blocked every gesture (2026-11-22, real Go2). Things above 1.0 m cannot
+      # hit a 0.4 m robot; people (legs) and furniture next to it are still caught.
+      setsid nohup ros2 run obstacle_detection obstacle_detection --ros-args -p max_height:=1.0 \
+        > /tmp/obstacle.log 2>&1 < /dev/null &
+      # light signal: the Go2 head light blinks while the obstacle check reports OBSTACLE
+      [ -f /root/obstacle_light.py ] && setsid nohup python3 /root/obstacle_light.py $(cat /root/obstacle_light.args 2>/dev/null) \
+        > /tmp/obstacle_light.log 2>&1 < /dev/null &
       sleep 2
       setsid nohup python3 /root/live_gesture_bridge.py --host 127.0.0.1 --require-clear --no-viz \
         --classes "$CLASSES" ${2:+$2} > /tmp/bridge.log 2>&1 < /dev/null &
@@ -101,7 +111,7 @@ case "${1:-status}" in
     echo "--- obstacle check:"; grep -E "Clear|Blocked|ready" /tmp/obstacle.log | tail -n 2
     grep -E "mode:|obstacle check" /tmp/bridge.log | tail -n 2
     ;;
-  stop)   stop_all; killp "obstacle_dete"; killp "ros2 run obstacle"; status ;;
+  stop)   stop_all; killp "obstacle_dete"; killp "ros2 run obstacle"; killp obstacle_light.py; status ;;
   status) status ;;
   *) echo "usage: $0 {start [--headless]|robot [--dry-run]|stop|status}"; exit 1 ;;
 esac

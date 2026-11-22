@@ -1,0 +1,22 @@
+# systemd USER service for the laptop:
+#   mkdir -p ~/.config/systemd/user && cp durance-dashboard.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now durance-dashboard
+#   journalctl --user -u durance-dashboard -f
+# WorkingDirectory / ExecStart: the dashboard folder (here the laptop layout; in a repository clone
+# e.g. %h/go2-next-reflex/dashboard). Run ./run.sh once first so .venv exists.
+[Unit]
+Description=Durance AI dashboard (http://127.0.0.1:8800)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/go2-hackathon/dashboard
+ExecStart=%h/go2-hackathon/dashboard/.venv/bin/python -m durance_dash
+Restart=on-failure
+RestartSec=3
+# the simulator / RViz need the desktop session
+Environment=DISPLAY=:0
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

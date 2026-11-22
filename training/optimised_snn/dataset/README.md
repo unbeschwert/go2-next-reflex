@@ -25,13 +25,14 @@ record_session.py  ──►  cut_takes.py --labeled  ──►  export_sessions
 | 1 | heart (arms make a heart over the head) | o0 | finger heart (1036) |
 | 2 | turn left 360 (left arm out to the side and back) | o1 | closed-loop turn left 360° |
 | 3 | turn right 360 (right arm out to the side and back) | o2 | closed-loop turn right 360° |
-| 4 | follow me (walk on the spot) | o3 | reserved for a future follow-me model |
+| 4 | follow me (walk on the spot) | o3 | LiDAR person following |
 | 5 | no action (natural movement, none of the gestures) | o4 | nothing |
 
 Output = id − 1, so the board keeps 5 outputs. Turn left and turn right are mirror images
 (`"mirror"` in `gestures.json`): the flip augmentation must swap their labels (`--mirror 1:2`).
-The existing `own` bridge leaves output 3 unassigned. Legacy `namaskaram` recordings are
-skipped when exporting the new gesture set.
+The bridge (`kria/live_gesture_bridge.py`) starts LiDAR following on output 3; it stays silent with
+models trained without follow me. Legacy `namaskaram` recordings are skipped when exporting the new
+gesture set.
 
 ## Record
 

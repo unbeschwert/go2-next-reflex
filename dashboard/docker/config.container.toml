@@ -1,0 +1,19 @@
+# Paths as mounted by docker-compose.yml / docker/run-dashboard.sh (/project = the folder above dashboard/).
+[server]
+host = "127.0.0.1"
+port = 8800
+
+[paths]
+project = "/project"
+repo = "/project"                    # repository checkout mounted at /project ...
+go2_viz = "/project/go2_viz"         # ... or the laptop layout (whichever has the files)
+riverops = "/project/riverops-src/riverops"
+models = "/project/models"
+data = "/project/data"
+share = "/project/share"
+captures = "/captures"
+state = "/state"
+organisers_zip = "/project/share/organisers.zip"
+
+[board]
+control_path = "/state/cm-board-%C"          # ~/.ssh is read-only in the container
