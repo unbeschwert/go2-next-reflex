@@ -165,9 +165,9 @@ python -m training.train_left_palm --grid 40 --precision qat --output .local/tra
 python -m training.export_left_palm --checkpoint .local/training/left-palm-snn-40-qat/left-palm-snn.pt --output models/left-palm-40-int8.json
 ```
 
-### Q2.6 comparison
+### Software quantization results
 
-The experiment used the same 76 held-out windows, initialization seeds, and training settings for each fold. Q2.6 uses one byte per weight and bias, a scale of 1/64, and the signed range −2 to 1.984375. The comparison keeps the input and membrane simulation fixed.
+The [software experiment](../models/left-palm-40-q26-comparison.json) compared Q2.6 conversion, Q2.6-aware training, and the laptop model on the same 76 held-out windows. It kept the input and membrane simulation fixed. The results describe PyTorch replay accuracy.
 
 | Weight encoding | Within 30 px | Median error | 90th-percentile error |
 |---|---:|---:|---:|
@@ -175,8 +175,13 @@ The experiment used the same 76 held-out windows, initialization seeds, and trai
 | Q2.6 conversion after training | 62/76 (81.6%) | 14.0 px | 35.4 px |
 | Q2.6 with quantization-aware training | 63/76 (82.9%) | 16.1 px | 40.1 px |
 
-Run `python -m training.compare_left_palm_quantization` to reproduce the [comparison](../models/left-palm-40-q26-comparison.json) in PyTorch.
+### Kria test plan
 
-### Kria deployment status
+The existing 40×40 gesture bitstream uses signed Q2.6 weights and biases, Q4.12 membrane potentials, hard reset on spikes, and five binary spike outputs. Q2.6 is the weight format for board tests against this bitstream. The current palm model uses a two-coordinate linear head and time pooling, both implemented in the laptop runtime.
 
-The JSON bundle targets the laptop PyTorch runtime. RiverSDK firmware requires a supported spiking output head, a native RiverOps architecture export and matching `weights.txt`. The current two-coordinate linear head and time pooling run in software. Native deployment needs an FPGA-compatible readout or a bridge that can read the FPGA feature maps, followed by RiverOps replay and an on-board timing check. The RiverOps SDK and live board were unavailable for this pilot.
+1. Define a spiking coordinate readout and confirm the exact layer graph and input and output shapes against the target bitstream. A graph change requires a matching RiverSDK firmware build.
+2. Train with the target Q2.6 and Q4.12 formats, spike reset behavior, and continuous state between frames. Match the camera bin duration, polarity order, and event scaling used for board replay.
+3. Generate the native RiverOps architecture JSON and `weights.txt` for that build. Confirm that the firmware configuration and bridge decoder agree on the output shape and encoding.
+4. Replay held-out clips through the matching build and report the fraction of forecasts within 30 camera pixels alongside the effective forecast latency.
+
+The RiverOps SDK and live board were unavailable for this pilot. The board test is pending a native palm readout and a matching build.
