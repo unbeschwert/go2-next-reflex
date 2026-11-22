@@ -2,9 +2,14 @@
 
 A restart per clip costs ~1-2 s, so this samples clips (alternating val/test, shuffled) until a time budget
 runs out, and runs the fixed-point simulation on the same clips for comparison.
-Usage: uv run python scripts/fpga_debug/fpga_accuracy.py [budget_seconds=200]
+
+The board must run this run's firmware, weights.txt and spleat-server config (deploy/). Frames are sent as
+despot sends them, i.e. block *sums* of events (the board's `inputs.scaling` = 4096 / downsampling² turns
+them into the network's "mean" input); the simulation gets the means it was trained on.
+
+Usage: uv run python scripts/fpga_debug/fpga_accuracy.py [--run runs/motion-buddy-80-v4] [--budget 200]
 """
-import json, math, random, subprocess, sys, time
+import argparse, json, math, random, subprocess, sys, time
 from pathlib import Path
 import numpy as np, torch
 sys.path[:0] = [".", "scripts"]
@@ -12,13 +17,19 @@ from fpga import FPGAClient
 from riverops.nn import prepare_ptq
 from training.snn.config import load_config
 from training.snn.events import read_events, events_to_counts, NAME_RE
+from training.snn.model import layer_shapes
 from training.snn.train import load_qat_model
 
-BUDGET = float(sys.argv[1]) if len(sys.argv) > 1 else 200
-KRIA = "root@durance-kria.local"
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument("--run", type=Path, default=Path("runs/motion-buddy-80-v4"))
+parser.add_argument("--budget", type=float, default=200, help="seconds")
+parser.add_argument("--host", default="durance-kria.local")
+args = parser.parse_args()
+KRIA = f"root@{args.host}"
 start = time.time()
-run = Path("runs/motion-buddy-40-v1"); cfg = load_config(run / "config.yaml")
+run = args.run; cfg = load_config(run / "config.yaml")
 T, S, ds = cfg.data.time_steps, cfg.data.size, cfg.data.downsampling
+last = layer_shapes(cfg)[-1]
 qat, formats = load_qat_model(run / "qat_best.pt", cfg)
 emu = prepare_ptq(qat, formats.riverops(qat=False), fuse=True).eval()
 
@@ -35,28 +46,30 @@ def restart():
                     "systemctl reset-failed spleat-server.service; systemctl restart spleat-server.service"], check=True)
     for _ in range(100):
         try:
-            c = FPGAClient("durance-kria.local", 3333, (2, S, S), (cfg.n_classes, 1, 1)); c.connect(); return c
+            c = FPGAClient(args.host, 3333, (2, S, S), (last.out_c, last.out_h, last.out_w)); c.connect(); return c
         except OSError:
             time.sleep(0.1)
     raise RuntimeError("spleat-server did not come back")
 
 results = {"val": [], "test": []}
 i = 0
-while time.time() - start < BUDGET:
+while time.time() - start < args.budget:
     split = ("val", "test")[i % 2]; i += 1
     if not queues[split]:
         if not any(queues.values()): break
         continue
     f, label = queues[split].pop()
-    x = events_to_counts(read_events(f), T, cfg.data.time_window_us, ds).astype(np.float32) / ds**2
+    sums = events_to_counts(read_events(f), T, cfg.data.time_window_us, ds).astype(np.float32)   # as despot sends
+    means = sums / ds ** 2 if cfg.data.encoding == "mean" else sums                                # as in training
     c = restart()                                        # reset: fresh potentials
     out = []
-    for frame in x:
+    for frame in sums:
         c.send_tensor(frame); out.append(c.receive_tensor()[0].ravel())
     c.close()
-    fpga_pred = int(np.array(out).sum(0).argmax())
+    # Score per class: spike counts summed over time and over the output map's positions.
+    fpga_pred = int(np.array(out).reshape(T, last.out_c, -1).sum((0, 2)).argmax())
     with torch.no_grad():
-        emu_pred = int(emu.net(torch.from_numpy(x)[None]).sum(1).flatten().argmax())
+        emu_pred = int(emu(torch.from_numpy(means)[None]).argmax())
     results[split].append((label, fpga_pred, emu_pred))
     if i % 10 == 0:
         print(f"  {time.time() - start:5.0f}s  clips done: val {len(results['val'])}, test {len(results['test'])}", flush=True)
@@ -67,7 +80,7 @@ def wilson(k, n, z=1.96):
     return (c - h, c + h)
 
 summary = {}
-print(f"\nFPGA with reset per clip ({time.time() - start:.0f}s):")
+print(f"\n{run.name}: FPGA with reset per clip ({time.time() - start:.0f}s):")
 for split, r in results.items():
     n = len(r)
     if not n: continue
@@ -77,5 +90,5 @@ for split, r in results.items():
     print(f"  {split:4s}: FPGA {fpga}/{n} = {fpga / n:.1%} (95% CI {lo:.0%}–{hi:.0%})   "
           f"simulation on same clips {emu_ok / n:.1%}   same prediction {agree}/{n}   [{n} of {totals[split]} clips]")
 out_dir = Path("runs/fpga_debug"); out_dir.mkdir(parents=True, exist_ok=True)
-(out_dir / "fpga_accuracy.json").write_text(json.dumps({"summary": summary, "results": {
+(out_dir / f"fpga_accuracy_{run.name}.json").write_text(json.dumps({"summary": summary, "results": {
     k: [(int(a), int(b), int(c)) for a, b, c in v] for k, v in results.items()}}, indent=1))
