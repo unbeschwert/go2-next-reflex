@@ -25,6 +25,8 @@ Use [the CVAT demo](labeling/README.md) to turn three clips from the local Duran
 
 Use the [training instructions](training/README.md) to train a PyTorch spiking gesture classifier on the local archive.
 
+The left-palm pilot includes a [40×40 RiverSDK architecture and weights](training/README.md#riversdk-left-palm-model), a [PyTorch model](training/README.md#40-40-left-palm-forecast), and a coordinate bridge.
+
 ## Team
 
 _TBD_

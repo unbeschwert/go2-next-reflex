@@ -137,3 +137,74 @@ python -m training.riverops_commands --checkpoint .local/training/commands-river
 ```
 
 Upload `movement_model.json` to RiverSDK to build the firmware. The board loads the matching `weights.txt`. Reproduce the training input when replaying events on the FPGA: two polarity channels on a `32 × 32` grid, ten 100,000-tick bins, and counts capped at 63 and divided by the source pixel area per cell. From the live camera this requires binning compatible with that grid and timing. Verify the four output counts on held-out recordings against RiverOps before using them as motion requests. [Durance model export guide](https://riversdk.dev/docs/hackathon/train_handgesture_recognition.html#Export-the-model-architecture)
+
+## 40×40 left-palm forecast
+
+The model uses four 25 ms event bins on a 40×40 grid to forecast the performer's left palm in the following 50 ms window. The output is in native 320×320 camera pixels. The default export stores all 7,152 weights and 50 biases as signed Q2.6 codes with a fixed scale of 1/64. The laptop bridge unpacks those codes and runs the quantized input and membrane simulation in PyTorch.
+
+The pilot uses [85 visible palm annotations](../labeling/session20_left_palm.csv) across six clips from one Session 20 performer. The two evaluation folds hold out one whole clip per motion style. Across all 76 held-out forecast windows, the Q2.6 model had a median error of 16.1 px and 63 predictions landed within 30 px (82.9%). The two-fold [results](../models/left-palm-40-q26-metrics.json) include a separate comparison on 63 windows with hand-labeled inputs for the motion baselines. The [exported Q2.6 model](../models/left-palm-40-q26.json) was refit on all six clips after evaluation.
+
+### Architecture and sources
+
+The palm trainer adapts the compact `GestureSNN` from this repository. It keeps the three convolutional leaky integrate-and-fire (Conv-LIF) stages and the early/late spike pooling, expands the event grid to 40×40, and trains a two-value regression readout on the Session 20 palm labels. [Original gesture model at `bb21c11`](https://github.com/unbeschwert/go2-next-reflex/blob/bb21c111ff5feed96dfcefbc0c19e2f24bcc052b/training/model.py)
+
+| Stage | Shape per forecast | Operation |
+|---|---|---|
+| Input | `4 × 2 × 40 × 40` | Four 25 ms bins of OFF and ON event counts. Cap counts at 63 and encode them as `log(1 + count) / log(64)`. |
+| Conv-LIF 1 | `4 × 8 × 20 × 20` | 3×3 convolution, stride 2, padding 1, followed by LIF neurons. |
+| Conv-LIF 2 | `4 × 16 × 10 × 10` | Same kernel, stride, and padding. |
+| Conv-LIF 3 | `4 × 24 × 5 × 5` | Same kernel, stride, and padding. |
+| Temporal pooling | `1200` | Average spikes for the first two and last two steps separately, then concatenate and flatten. |
+| Linear readout | `2` | Predict normalized palm coordinates. Convert each output `v` to camera pixels with `80 × v + 160`. |
+
+Membrane state starts at zero for each forecast and carries across its four input bins. A neuron subtracts its firing threshold on a spike. Training uses a surrogate gradient at the spike threshold and mean squared error on the normalized coordinates. The labeled target comes from the 50 ms window immediately after the input bins. The model has 7,202 trainable parameters, comprising 7,152 weights and 50 biases.
+
+Neftci, Mostafa, and Zenke describe the surrogate-gradient method used to train spiking networks with binary spike outputs. [Surrogate Gradient Learning in Spiking Neural Networks, 2019](https://arxiv.org/abs/1901.09948)
+
+Rudnev et al. provide related work on estimating hand pose from an event stream. The palm pilot learns its 2D forecast from the Session 20 labels. [EventHands, ICCV 2021](https://openaccess.thecvf.com/content/ICCV2021/papers/Rudnev_EventHands_Real-Time_Neural_3D_Hand_Pose_Estimation_From_an_Event_ICCV_2021_paper.pdf)
+
+### Replay the model
+
+Run from the repository root with Python, NumPy and PyTorch. Keep `go2_gestures_s20.zip` in the repository root for archive replay, or use `--recording` with a local one-second event capture.
+
+```sh
+python -m training.left_palm_bridge --member motion_buddy_dataset/20/gesture_02-turn-left-360-normal-09.bin
+```
+
+The bridge writes one JSON line per 50 ms of sensor time with `target_window_start_us`, `target_window_end_us`, `left_palm_x`, and `left_palm_y`. The first prediction follows 100 ms of input. With no recording argument, the bridge reads JSON lines from standard input. Each line covers a 25 ms bin and contains an integer `window_start_us` and nonnegative integer `counts` with shape `[2, 40, 40]`, in OFF, ON order. Sum events per 8×8 sensor cell. Include zero-filled bins for quiet intervals and use contiguous sensor timestamps. A timestamp gap clears the context, and an all-zero context emits null coordinates. The model has no visibility head, so coordinates from other motion or occlusion still require validation.
+
+Pass `--ros-topic /left_palm/forecast` from a ROS 2 environment with `rclpy` and `std_msgs` to publish the JSON messages as `std_msgs/msg/String`. A live capture adapter must supply the input bins. The bridge produces coordinate telemetry. The existing gesture bridge uses a separate five-spike output contract and publishes robot commands.
+
+### Reproduce training and export
+
+Training also requires SciPy for the seeded-tracker baseline. The replay path does not import SciPy. The trainer defaults to 40×40 with Q2.6 quantization-aware training.
+
+```sh
+python -m training.train_left_palm
+python -m training.export_left_palm --checkpoint .local/training/left-palm-snn-40-q26/left-palm-snn.pt --output models/left-palm-40-q26.json
+```
+
+### Software quantization results
+
+The [software experiment](../models/left-palm-40-q26-comparison.json) compared Q2.6 conversion, Q2.6-aware training, and the earlier per-channel INT8 baseline on the same 76 held-out windows. It kept the input and membrane simulation fixed. Replay the earlier baseline with `--model models/left-palm-40-int8.json`.
+
+| Weight encoding | Within 30 px | Median error | 90th-percentile error |
+|---|---:|---:|---:|
+| Per-channel INT8 with quantization-aware training | 64/76 (84.2%) | 14.2 px | 38.1 px |
+| Q2.6 conversion after training | 62/76 (81.6%) | 14.0 px | 35.4 px |
+| Q2.6 with quantization-aware training | 63/76 (82.9%) | 16.1 px | 40.1 px |
+
+## RiverSDK left-palm model
+
+Upload [the native `model.json`](../models/left-palm-40-riversdk/model.json) to RiverSDK with **KV260**, **GenX320**, **Q2.6 weights**, and **Q4.12 potentials**. It matches the five-layer 40×40 `nb40` graph used by job 28 byte for byte. A bitstream built from that graph with matching options can load [the palm `weights.txt`](../models/left-palm-40-riversdk/weights.txt). The text file contains 175,191 integers in SPLEAT order. The JSON containing `int8_base64` is the laptop bridge bundle. [The reference graph on `main`](https://github.com/unbeschwert/go2-next-reflex/blob/44df278296d69742829d6181d6bebda778498435/models/optimised_snn/nb40_model.json)
+
+The native network takes one `2 × 40 × 40` OFF/ON count frame every 10 ms and uses signed Q2.6 weights and biases, Q4.12 membrane potentials, and hard reset on a spike. Training divides the event count per 8×8 block by 64, matching the `nb40` camera setup with `inputs.scaling: 64`. The network emits five binary spike outputs ordered `X+`, `X-`, `Y+`, `Y-`, and unused. The coordinate bridge averages spikes over ten consecutive steps and converts the rate differences to pixels. It emits one forecast per 50 ms targeting the next 50 ms window.
+
+```sh
+python -m training.train_left_palm_riversdk --output models/left-palm-40-riversdk
+python -m training.left_palm_bridge --riversdk-spikes --ros-topic /left_palm/forecast
+```
+
+For the second command, pipe in the SPLEAT spikes with their corresponding input-bin timestamps as JSON lines. Each record contains `window_start_us` and an array `spikes` of five binary values. The coordinate bridge publishes the same message fields as the laptop path. The gesture bridge interprets those channels as motion commands and requires the gesture weights.
+
+The native file passed a round trip with `main`'s `weights_convert.py`. The training simulator and `main`'s integer SPLEAT simulator produced identical spikes on 840 steps of replay with the exported weights. Across the two held-out folds, 33/76 native-model forecasts landed within 30 px (43.4%) and median error was 32.9 px. Live FPGA and ROS 2 tests remain pending. [Native evaluation results](../models/left-palm-40-riversdk/metrics.json)

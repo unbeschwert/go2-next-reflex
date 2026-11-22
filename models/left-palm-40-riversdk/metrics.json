@@ -1,0 +1,63 @@
+{
+  "parameter_format": "Q2.6",
+  "potential_format": "Q4.12",
+  "reset": "hard",
+  "bin_us": 10000,
+  "readout_steps": 10,
+  "warmup_steps": 40,
+  "epochs": 50,
+  "seed": 17,
+  "folds": [
+    {
+      "train": [
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-normal-32.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-fast-32.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-large-32.bin"
+      ],
+      "test": [
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-normal-09.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-fast-09.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-large-09.bin"
+      ],
+      "metrics": {
+        "forecasts": 35,
+        "median_px": 30.0,
+        "p90_px": 49.34743957519532,
+        "mean_px": 30.571540682656423,
+        "max_px": 64.88451385498047,
+        "within_10_px": 0.08571428571428572,
+        "within_30_px": 0.5142857142857142
+      }
+    },
+    {
+      "train": [
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-normal-09.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-fast-09.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-large-09.bin"
+      ],
+      "test": [
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-normal-32.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-fast-32.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-large-32.bin"
+      ],
+      "metrics": {
+        "forecasts": 41,
+        "median_px": 37.10795211791992,
+        "p90_px": 60.8276252746582,
+        "mean_px": 40.360530074049784,
+        "max_px": 100.4987564086914,
+        "within_10_px": 0.04878048780487805,
+        "within_30_px": 0.36585365853658536
+      }
+    }
+  ],
+  "software_metrics": {
+    "forecasts": 76,
+    "median_px": 32.91428184509277,
+    "p90_px": 57.73322296142578,
+    "mean_px": 35.85244285432916,
+    "max_px": 100.4987564086914,
+    "within_10_px": 0.06578947368421052,
+    "within_30_px": 0.4342105263157895
+  }
+}
