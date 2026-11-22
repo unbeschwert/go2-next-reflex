@@ -89,6 +89,26 @@ def spike_count_loss(scores: torch.Tensor, targets: torch.Tensor, time_steps: in
     return (scores - targets).square().mean(dim=1).mean() / time_steps
 
 
+def classification_loss(scores: torch.Tensor, y: torch.Tensor, mix, cfg: Config) -> torch.Tensor:
+    """train.loss 'mse': spike counts to 80/20 % of T targets (the notebook). 'ce': cross-entropy on
+    counts / ce_temperature. 'ce+mse': both, the MSE weighted by ce_mse_weight to keep the counts in range.
+    With mixup (mix = (permutation, lambda)) the targets and labels are blended like the inputs."""
+    t, T, n = cfg.train, cfg.data.time_steps, cfg.n_classes
+    targets = spike_targets(y, T, n, cfg)
+    labels = nn.functional.one_hot(y, n).float()
+    if mix is not None:
+        perm, lam = mix
+        targets = lam * targets + (1 - lam) * targets[perm]
+        labels = lam * labels + (1 - lam) * labels[perm]
+    loss = scores.new_zeros(())
+    if t.loss in ("ce", "ce+mse"):
+        log_p = nn.functional.log_softmax(scores / t.ce_temperature, dim=1)
+        loss = loss + (-(labels * log_p).sum(dim=1)).mean()
+    if t.loss in ("mse", "ce+mse"):
+        loss = loss + (t.ce_mse_weight if t.loss == "ce+mse" else 1.0) * spike_count_loss(scores, targets, T)
+    return loss
+
+
 def clamp_parameters(model: nn.Module, limit: float) -> None:
     with torch.no_grad():
         for module in model.modules():
@@ -118,11 +138,7 @@ def run_epoch(model, data: SplitData, cfg: Config, optimizer=None, clamp: float 
         for index in order.split(cfg.train.batch_size):
             x, y, warmup, mix = data.batch(index, augment=training and augment)
             scores = model(x, warmup=warmup)
-            targets = spike_targets(y, T, n, cfg)
-            if mix is not None:                     # mixup: blend the spike-count targets like the inputs
-                perm, lam = mix
-                targets = lam * targets + (1 - lam) * targets[perm]
-            loss = spike_count_loss(scores, targets, T)
+            loss = classification_loss(scores, y, mix, cfg)
             if not torch.isfinite(loss):
                 raise FloatingPointError(f"loss is {loss.item()} ({'training' if training else 'evaluation'}); "
                                          "see 'NaN during QAT' in training/README.md")
@@ -158,12 +174,25 @@ def lr_schedule(cfg: Config):
     return lambda epoch: t.lr_min + (t.lr - t.lr_min) * 0.5 * (1 + math.cos(math.pi * min(epoch - 1, n) / n))
 
 
+def make_optimizer(model, lr: float, cfg: Config):
+    """train.optimizer 'adam': L2 decay on every parameter. 'adamw': decoupled decay on the conv
+    weights only (parameters with more than one dimension); BatchNorm, biases and leaks are not decayed."""
+    t = cfg.train
+    if t.optimizer == "adam":
+        return torch.optim.Adam(model.parameters(), lr=lr, weight_decay=t.weight_decay)
+    params = [p for p in model.parameters() if p.requires_grad]
+    decay = [p for p in params if p.ndim > 1]
+    rest = [p for p in params if p.ndim <= 1]
+    return torch.optim.AdamW([{"params": decay, "weight_decay": t.weight_decay},
+                              {"params": rest, "weight_decay": 0.0}], lr=lr)
+
+
 def fit(model, train: SplitData, val: SplitData, cfg: Config, *, epochs: int, lr: float, phase: str,
         clamp: float | None, history: list, run_dir: Path, augment: bool = True, after_step=None,
         schedule=None, average_last: int = 0):
     """Train; return the model with the best validation accuracy, or with average_last > 0 the average
     of the weights of the last average_last epochs (no selection on validation)."""
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=cfg.train.weight_decay)
+    optimizer = make_optimizer(model, lr, cfg)
     best_acc, best_state = -1.0, copy.deepcopy(model.state_dict())
     average, averaged = None, 0
     for epoch in range(1, epochs + 1):

@@ -1,0 +1,8 @@
+# motion_buddy_80_v3_s4 with AdamW: decoupled weight decay on the conv weights only
+# (Adam's L2 decay shrank the BatchNorm gamma of dead channels towards 0, the QAT NaN cause).
+base: motion_buddy_80_v3_s4.yaml
+name: motion_buddy_80_v3_s4_adamw
+
+train:
+  optimizer: adamw
+  weight_decay: 0.01

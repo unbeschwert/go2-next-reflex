@@ -41,6 +41,9 @@ Val / test accuracy in %. Unless noted: batch 32, constant lr 3e-3, weight decay
 | 14 | **`motion-buddy-40-v3`** | 11-21 22:38 | **v3** | 40 epochs, batch 16, cosine lr, average of last 10, dropout 0.2 | v3 set (below) | per-layer scaling, Q1.7, no QAT | 71.5 / 76.8 | **71.9 / 75.3** |
 | 15 | `motion-buddy-40-v3-qat` | 11-21 23:07 | v3 | = #14 | = #14 | = #14 + 5 QAT epochs (lr 1e-4) | 71.5 / 76.8 | 76.6 / 73.0 |
 | 16 | `motion-buddy-40-v3-affine` | 11-21 23:07 | v3 | = #14 | v3 set + zoom 0.8–1.2 / rotation ±10° (p 0.5) | = #14 | 79.1 / 72.4 | 79.3 / 72.4 |
+| 17 | `e10-40-v3` | 11-22 00:04 | v3 | **10 epochs**, cosine over 7, average of last 3 | v3 set | = #14 | 72.3 / 55.1 | 69.0 / 55.9 |
+| 18 | `e10-80-v3-s4` | 11-22 00:05 | v3 at **80×80**, first layer k7 s4 (80→19) | = #17 | v3 set, ±8 px | = #14 | 71.0 / 62.0 | 70.6 / 58.2 |
+| 19 | `e10-80-v3-deep` | 11-22 00:07 | v3 at **80×80** + 16-ch k4 s2 layer in front (80→40) | = #17 | v3 set, ±8 px | = #14 | 67.6 / 59.8 | 67.4 / 59.8 |
 
 Rows 3, 10–13 and 15 re-quantize an existing float model with `remote/qat.sh`, so their float numbers are those of the run they start from.
 
@@ -71,6 +74,9 @@ What each augmentation does: [data-augmentation.md](data-augmentation.md).
 | #14 `motion-buddy-40-v3` | 71.0 | 72.8 | 84.4 | 66.3 | hello (P13 51 %, P14 23 %), sit P14 60 % |
 | #15 `motion-buddy-40-v3-qat` | 75.3 | 78.0 | 83.7 | 62.4 | hello (P13 43 %, P14 23 %), sit P14 42 %, lay-down P14 66 % |
 | #16 `motion-buddy-40-v3-affine` | 77.3 | 81.5 | 80.1 | 64.9 | hello (P13 63 %, P14 33 %), dance (P13 53 %, P14 56 %), sit P14 58 % |
+| #17 `e10-40-v3` | 70.2 | 67.7 | 68.1 | 43.7 | sit P14 19 %, no-action P14 25 % |
+| #18 `e10-80-v3-s4` | 65.9 | 75.9 | 65.9 | 50.5 | dance (P13 42 %, P14 31 %), sit P14 35 %, hello P14 26 % |
+| #19 `e10-80-v3-deep` | 68.6 | 65.9 | 65.9 | 53.8 | sit collapsed (P13 29 %, P14 0 %, P12 6 %) |
 
 `scripts/eval_per_person.py runs/<run>` prints this plus the per-class recall and confusion matrix. For #9 in float: P13 78 %, P14 62 %, dance recall 93 %, sit weak for P14.
 
@@ -90,10 +96,13 @@ What each augmentation does: [data-augmentation.md](data-augmentation.md).
 
 **#16: zoom/rotation on the v3 net: better val, slightly lower test.** Val +7.4 (79.3 vs 71.9), test −2.9 (72.4 vs 75.3), which is close to the noise level. It moves errors between classes: test hello 36 → 47 % (P14 23 → 33 %), test dance 71 → 54 % (now often predicted as sit). No 8-bit loss (float and fixed point both 72.4 % test). Train accuracy stayed at 65–71 % and val was still rising in the last epochs, so with zoom on, 40 epochs is probably too short. Next: the same config with more epochs.
 
+**#17–#19: 80×80 input, 10-epoch comparison.** Same recipe, only the input size and the first layers differ, and all three are undertrained, so compare them only with each other. Test (fixed point) went 55.9 % at 40×40 → 58.2 % (k7 s4) and 59.8 % (deep). Person 14, the small off-centre subject, gained the most: 43.7 → 50.5 → 53.8 %. Val stayed about the same (69–71 %). The gain is consistent across both 80×80 variants but within 2–4 points of noise on test, so it needs the full 40-epoch runs. The deep variant had not learnt *sit* yet at epoch 10 (0 % for P14); it starts slower. k7 s4 lost 3.8 test points in 8-bit (62.0 float → 58.2 fixed), more than the others. With three runs sharing the GPU, an epoch took ~155 s (40×40 and k7 s4) and ~185 s (deep).
+
 Assumptions in #14 (the notebook isn't in the repo): dropout after layers 1–3, the augmentation probabilities, mixup α 0.4, cosine over the first 30 epochs.
 
 ## Open questions and next runs
 
+- 80×80 at 40 epochs: `motion_buddy_80_v3_s4.yaml` and `motion_buddy_80_v3_deep.yaml` (#18/#19 looked promising for person 14 after 10 epochs). Before deploying, check that SPLEAT keeps up at 100 Hz with ~4× more active input pixels.
 - v3 + zoom/rotation with more epochs (#16 was still improving at epoch 40).
 - One seed per config so far: a second seed of #14 and #16 would show how much of the 3-point test difference is noise.
 - The 88 % test figure we were aiming for: probably the notebook's split (train 01–03, val 04, test 05). Not comparable to our split until we run that split.

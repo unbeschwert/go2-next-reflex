@@ -1,0 +1,9 @@
+# motion_buddy_80_v3_s4 with cross-entropy on the spike counts (counts / 10 as logits) plus the
+# notebook's MSE to the 80/20 % targets, which keeps the counts in a range the 8-bit FPGA is sized for.
+base: motion_buddy_80_v3_s4.yaml
+name: motion_buddy_80_v3_s4_ce
+
+train:
+  loss: ce+mse
+  ce_temperature: 10.0
+  ce_mse_weight: 1.0

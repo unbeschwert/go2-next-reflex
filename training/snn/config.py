@@ -193,6 +193,15 @@ class TrainConfig:
     # Weight averaging: the final float model is the average of the last N epochs' weights instead of
     # the single epoch with the best validation accuracy (0 = best epoch, as before).
     average_last: int = 0
+    # adam: weight decay added to the gradient (as the reference notebook), every parameter.
+    # adamw: decoupled decay, conv weights only (not BatchNorm, biases or the learnable leak);
+    # needs a larger weight_decay (~1e-2) for a similar effect.
+    optimizer: str = "adam"
+    # mse: spike counts to target_high/target_low * T (the notebook). ce: cross-entropy on counts /
+    # ce_temperature. ce+mse: both, MSE weighted by ce_mse_weight (keeps the counts in the 20-80 % range).
+    loss: str = "mse"
+    ce_temperature: float = 10.0
+    ce_mse_weight: float = 1.0
     weight_decay: float = 0.0001
     grad_clip: float = 1.0
     weight_clamp: float | None = 1.0   # clamp conv weights and BN affine params after each step
@@ -332,6 +341,12 @@ def validate(cfg: Config) -> None:
     if not 0 <= f.reserve < 1:
         raise ConfigError("fpga.reserve must be in [0, 1)")
     t, m = cfg.train, cfg.model
+    if t.loss not in ("mse", "ce", "ce+mse"):
+        raise ConfigError(f"train.loss must be 'mse', 'ce' or 'ce+mse', got {t.loss!r}")
+    if t.ce_temperature <= 0 or t.ce_mse_weight < 0:
+        raise ConfigError("train.ce_temperature must be > 0 and train.ce_mse_weight >= 0")
+    if t.optimizer not in ("adam", "adamw"):
+        raise ConfigError(f"train.optimizer must be 'adam' or 'adamw', got {t.optimizer!r}")
     if t.average_last < 0 or t.average_last > t.epochs:
         raise ConfigError("train.average_last must be 0..train.epochs")
     if t.lr_min is not None and not 0 < t.lr_min <= t.lr:
