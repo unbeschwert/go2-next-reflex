@@ -5,7 +5,7 @@ Motion Buddy layout, so `train_snn_v8.py --zip` reads them like the Durance AI t
 
 ```
 record_session.py  ──►  cut_takes.py --labeled  ──►  export_sessions.py   (share zip, person-safe split)
- cued recording          1 s clips + quality          or pack_dataset.py   (added to a copy of the
+ cued recording          1 s clips + quality          or pack_dataset.py   (compatible labels in a copy of the
  labels from the cue     filters + previews                                 Motion Buddy zip)
 ```
 
@@ -25,11 +25,13 @@ record_session.py  ──►  cut_takes.py --labeled  ──►  export_sessions
 | 1 | heart (arms make a heart over the head) | o0 | finger heart (1036) |
 | 2 | turn left 360 (left arm out to the side and back) | o1 | closed-loop turn left 360° |
 | 3 | turn right 360 (right arm out to the side and back) | o2 | closed-loop turn right 360° |
-| 4 | follow me (walk on the spot) | o3 | LiDAR person following |
+| 4 | follow me (walk on the spot) | o3 | reserved for a future follow-me model |
 | 5 | no action (natural movement, none of the gestures) | o4 | nothing |
 
 Output = id − 1, so the board keeps 5 outputs. Turn left and turn right are mirror images
 (`"mirror"` in `gestures.json`): the flip augmentation must swap their labels (`--mirror 1:2`).
+The existing `own` bridge leaves output 3 unassigned. Legacy `namaskaram` recordings are
+skipped when exporting the new gesture set.
 
 ## Record
 
@@ -41,7 +43,7 @@ ssh root@192.168.77.1 '/root/inference.sh stop'
 RT=~/.local/share/uv/tools/river-tools/bin/python
 
 # one new person: heart, turn left, turn right, no action; 1 min each (20 s normal / fast / large)
-$RT record_session.py --session 20
+$RT record_session.py --session 20 --classes 1,2,3
 
 # follow me for a person who already recorded (session 20): new session, same person
 $RT record_session.py --session 31 --classes follow --no-action 0 --person 20 --minutes 3
@@ -95,14 +97,22 @@ python3 export_sessions.py --sessions 20 --raw   # also zip the raw takes
 
 The split is by person, so test scores show how a model does on people it has never seen.
 The exporter refuses a split that puts one person's sessions in different parts, and its README
-prints the matching `train_snn_v8.py` command. `--time-split 70,15,15` splits every take in time
-instead, for when there are fewer than three people.
+prints the matching `train_snn_v8.py` command when the archive contains all three splits.
+The trainer also checks the person IDs from the archive. `--time-split 70,15,15` splits longer
+takes in time for a within-person comparison.
 
-To train on our sessions together with the Durance AI team's data:
+The packer preserves labels when their IDs and names agree with the base archive. The Motion Buddy
+and own-gesture sets reuse IDs for different gestures. To train the Motion Buddy classifier with
+our recordings as background, label the appended clips explicitly as no-action:
 
 ```bash
-python3 pack_dataset.py --sessions 20,21 --out motion_buddy_plus.zip
+python3 pack_dataset.py --base motion_buddy_full.zip --sessions 20,21 \
+  --as-no-action --out motion_buddy_plus.zip
 ```
+
+To train on our gesture classes, use the export as the primary archive and pass Motion Buddy as
+`--neg-zip` with explicit `--neg-train` or `--neg-eval` sessions. Keep all sessions of an
+individual in the same split when combining sources.
 
 ## Our dataset
 

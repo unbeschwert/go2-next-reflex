@@ -25,7 +25,7 @@
       "id": 4,
       "name": "follow-me",
       "how": "WALK ON THE SPOT: walk normally without going anywhere - lift your feet a little and swing your arms like walking down the street, keep going",
-      "go2": "LiDAR follow mode: walks after you, stops when you stop",
+      "go2": "Reserved for person following; the existing bridge leaves this output unassigned",
       "note": "2026-11-22: replaced namaskaram (dropped as too faint; its clips were deleted). Recorded as new sessions 31+ (--person = the person's earlier session), 3 min: facing the camera, then back to the camera (styles front/frontfast/back/backfast). Feet must be in view.",
       "styles": [
         "front",
