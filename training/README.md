@@ -149,7 +149,7 @@ The pipeline therefore uses:
   | **per-layer, no QAT** | **83.2** | **67.9** |
   | per-layer sized for weights only (biases clipped) + QAT | 55.6 | 36.8 |
 
-  Per-layer formats without fine-tuning lose only ~1–2 points, and QAT on top doesn't help. **Biases must fit**: clipping them broke the model, and QAT hid it (train 93 %, val 50 %, because fused-BN QAT rebuilds the bias around batch statistics in training mode). An earlier test that scaled only layer 0 but kept the format chosen with layer 0 included showed no gain; that test was flawed. **Still to confirm on the board** that SPLEAT uses the per-layer thresholds from `weights.txt`: `scripts/fpga_debug/threshold_fpga_check.py`.
+  Per-layer formats without fine-tuning lose only ~1–2 points, and QAT on top doesn't help. **Biases must fit**: clipping them broke the model, and QAT hid it (train 93 %, val 50 %, because fused-BN QAT rebuilds the bias around batch statistics in training mode). An earlier test that scaled only layer 0 but kept the format chosen with layer 0 included showed no gain; that test was flawed. **Confirmed on the board** (2026-11-22, `motion-buddy-80-v4`, k = [2, 1, 1, 1, 2]): FPGA and fixed-point simulation give the same prediction on 19 of 20 clips, which they couldn't if SPLEAT ignored the per-layer thresholds ([doc/fpga-debugging.md](../doc/fpga-debugging.md#7-checks-on-the-8080-avg-pool-model-2026-11-22)).
 - **16-bit Q4.12 potentials.** Each neuron's potential is stored between time steps, in 18-bit BRAM words. Q4.12 gives the spleat-server `scaling` 4096 for one input unit, divided by downsampling² because despot sends block sums and training uses means.
 
 ### `fpga.py` estimate

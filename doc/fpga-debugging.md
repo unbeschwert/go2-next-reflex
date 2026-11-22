@@ -288,6 +288,8 @@ another run.
 | `restart_check.py` | **restarts spleat-server before each sample**; zeros and 10 clips vs simulation from zero (E5) | ~3 min |
 | `concat_check.py` | **one restart, 20 clips back-to-back**; neuron-update variants, near-threshold margins; saves `runs/fpga_debug/concat_fpga.npz` (F) | ~3 min |
 | `concat_offline.py` | more variants (input clamp, leak order, single rounding) against the saved FPGA outputs, no board needed (F) | ~2 min |
+| `fpga_accuracy.py --run <run> --budget <s>` | FPGA vs fixed-point simulation accuracy on sampled val/test clips, restart per clip; any run, frames sent as despot sends them (Section 7) | ~4.5 s per clip |
+| `twos_complement_check.py --run <run> --clips <n>` | same clips with signed and two's complement `weights.txt`, compares raw outputs; restores the signed file (Section 7) | ~3 min for 20 clips |
 
 ```bash
 uv run python scripts/fpga_debug/restart_check.py
@@ -297,3 +299,43 @@ uv run python scripts/fpga_debug/restart_check.py
 frames between clips, or reconnecting). They're kept to show how we got there. For new measurements, use the
 `concat_check.py` method (one restart, clips back-to-back, simulated the same way). It's the fastest clean comparison,
 since this server version has no faster reset than a service restart.
+
+---
+
+## 7. Checks on the 80×80 avg-pool model (2026-11-22)
+
+Model `motion-buddy-80-v4` ([training-log.md](training-log.md) #34): 80×80 input, avg-pool layers folded into
+plain convs (k8 s4, k3, k6 s2, k6 s2, k2), Q1.7 weights with per-layer threshold scaling k = [2, 1, 1, 1, 2],
+Q4.12 potentials. Firmware: riversdk.dev job #45 (KV260, GenX320, less resources). Board config: inputs 80×80,
+`scaling: 256`, despot downsampling 4. Frames were sent as despot sends them (block sums), with a service restart
+before every clip.
+
+**Two's complement weights** (`twos_complement_check.py`, 10 val + 10 test clips). All 48,911 negative 8-bit
+weights and biases written as v + 256 (−1 → 255, −110 → 146) instead of signed decimals:
+
+| | signed | two's complement |
+|---|---|---|
+| raw outputs identical (every frame, every class) | 20/20 | 20/20 |
+| prediction agrees with the fixed-point simulation | 19/20 | 19/20 |
+| mean output spikes per clip | 148.2 | 148.2 |
+
+spleat-server keeps only the low 8 bits of each weight and bias, so both encodings are the same to the hardware;
+our export's signed decimals are fine.
+
+**What the agreement with the simulation confirms** (19/20 clips, same prediction): the board runs the model the way
+our fixed-point simulation does, including the parts that were only assumed so far:
+
+- **per-layer thresholds** from `weights.txt`: thresholds differ by up to 2× between layers here. If SPLEAT
+  ignored them, those layers would spike at a very different rate and the predictions would not agree;
+- **avg-pool folding**: the firmware sees ordinary convs, and they compute what the pooled network computes;
+- **input scaling** `4096 / downsampling²` with despot-style block sums.
+
+20 clips are too few to compare accuracy (12/20 correct for both FPGA and simulation; the expected 72 % is inside
+the uncertainty). For an accuracy estimate, run `fpga_accuracy.py --run runs/motion-buddy-80-v4` with a budget of
+~30 min (all 1,042 val/test clips at ~4.5 s each would take ~80 min).
+
+**Deploying a model temporarily.** We backed up the board's firmware, `weights.txt`, both configs and the command
+lines of the running pipeline (`/root/backup-before-<model>-<date>/`, with `SHA256SUMS`), installed ours, tested,
+then restored the backup and checked every file against the checksums. Two pitfalls: `pgrep -f`/`pkill -f` over SSH
+also match the remote shell running the command (it contains the pattern) and kill your own session; and the live
+gesture bridge sends commands to the Go2, so don't restart it unattended.

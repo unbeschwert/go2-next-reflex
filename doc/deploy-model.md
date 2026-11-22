@@ -115,6 +115,8 @@ threshold layer N
 leak layer N
 ```
 
+Negative weights and biases can be written as signed decimals (`-110`, what our export writes) or as 8-bit two's complement (`146`): spleat-server keeps only the low 8 bits, and both give bit-identical outputs (measured on the board, [fpga-debugging.md](fpga-debugging.md#7-checks-on-the-8080-avg-pool-model-2026-11-22)).
+
 This is exactly what the notebook writes to `motion_buddy_parameters.txt`. Rename it, or point `weights_file` at it.
 
 ## 5. Restart and check
