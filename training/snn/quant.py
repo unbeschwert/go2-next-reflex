@@ -157,12 +157,18 @@ def layer_scales(model, formats: Formats, cfg: Config) -> tuple[list[int], list[
 
 
 def apply_layer_scales(model, scales: list[int], threshold: float) -> None:
-    """Divide each layer's BatchNorm affine (so the folded weights and bias) and its threshold by k."""
+    """Divide each layer's folded weights and bias, and its threshold, by k: through the BatchNorm affine
+    when the layer still has BatchNorm, else (an already fused SpikingConv2d) the conv itself."""
     with torch.no_grad():
         for layer, k in zip(model.net, scales):
             if k != 1:
-                layer.bn.weight /= k
-                layer.bn.bias /= k
+                if getattr(layer, "bn", None) is not None:
+                    layer.bn.weight /= k
+                    layer.bn.bias /= k
+                else:
+                    layer.conv.weight /= k
+                    if layer.conv.bias is not None:
+                        layer.conv.bias /= k
             layer.lif.v_threshold = threshold / k
 
 

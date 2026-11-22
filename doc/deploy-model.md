@@ -63,9 +63,11 @@ inputs:
   scaling: 256.0           # = 4096 / downsampling² for models trained on "mean" frames (see below)
 outputs:
   channels: 5              # number of classes / output neurons
-  height: 1
+  height: 1                # > 1 for a model with a spatial head (see below)
   width: 1
 ```
+
+A model with a **spatial head** (`training/snn`, [architecture-options.md](architecture-options.md#spatial-head)) has a `classes × H × W` output, e.g. `channels: 5, height: 2, width: 2`. Its exported `spleat-server-config.yaml` sets these, and whatever reads the results must add each class's H·W values to get one score per class.
 
 **`scaling` must undo despot's block sums.** despot (`despot_send_and_forget`) sends the **sum** of
 the events in each downsampling block (payload values are whole numbers 1, 2, 3, …; measured on
@@ -122,4 +124,4 @@ systemctl restart spleat-server.service      # or start by hand to see logs, see
 journalctl -u spleat-server.service -f
 ```
 
-The server then sends one result per frame over TCP (port 3333): a 4-byte length followed by CBOR `{"id", "payload", "latency", "error"}`. `payload` holds `outputs.channels` × float32. `gesture_node` in `go2-kria` reads these.
+The server then sends one result per frame over TCP (port 3333): a 4-byte length followed by CBOR `{"id", "payload", "latency", "error"}`. `payload` holds `outputs.channels` × float32 (× height × width for a spatial head; the readers here, `kria/live_gesture_bridge.py` and `scripts/fpga.py`, still expect one value per class). `gesture_node` in `go2-kria` reads these.

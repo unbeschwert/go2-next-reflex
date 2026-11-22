@@ -17,11 +17,11 @@ import numpy as np
 import torch
 from torch import nn
 
-from riverops.nn import BatchNorm2d, Conv2d, prepare_ptq, prepare_qat
+from riverops.nn import BatchNorm2d, Conv2d, fuse_model, prepare_ptq, prepare_qat
 
 from .augment import augment as augment_counts
 from .config import Config
-from .model import build_model
+from .model import build_model, has_pooling
 from .quant import Formats, apply_layer_scales, choose_formats, describe_layers, layer_scales
 
 
@@ -292,10 +292,18 @@ def save_checkpoint(path: Path, model, cfg: Config, formats: Formats | None, pha
                 "thresholds": [float(layer.lif.v_threshold) for layer in model.net]}, path)
 
 
+def deployable(model, cfg: Config):
+    """The model as quantization handles it. Layers with avg-pooling can't use riverops' fusion-aware QAT
+    or export_params, so a network with pooling is fused first (BatchNorm and pool folded into plain
+    SpikingConv2d layers, the form the FPGA runs). Without pooling the model is returned unchanged, so
+    BatchNorm stays separate for fusion-aware QAT as before."""
+    return fuse_model(model.eval()) if has_pooling(cfg) else model
+
+
 def load_qat_model(path: Path, cfg: Config):
     checkpoint = torch.load(path, map_location="cpu", weights_only=True)
     formats = Formats(**checkpoint["formats"])
-    model = prepare_qat(build_model(cfg), formats.riverops(), fused_bn=True)
+    model = prepare_qat(deployable(build_model(cfg).eval(), cfg), formats.riverops(), fused_bn=True)
     model.load_state_dict(checkpoint["state_dict"])
     for layer, threshold in zip(model.net, checkpoint.get("thresholds") or []):
         layer.lif.v_threshold = threshold
@@ -363,7 +371,7 @@ def quantize(model, cfg: Config, splits: dict, run_dir: Path, history: list) -> 
     device = next(model.parameters()).device
     plain = build_model(cfg).to(device)            # same weights, without the training-only dropout layers
     plain.load_state_dict(model.state_dict())
-    model = plain.eval()
+    model = deployable(plain.eval(), cfg).to(device)
     float_val, float_test = run_epoch(model, splits["val"], cfg), run_epoch(model, splits["test"], cfg)
 
     # 2. Choose the number formats from the BN-folded parameters.

@@ -1,0 +1,4 @@
+# head.yaml with seed 43, like optim-adam-seed43.
+base: head.yaml
+name: arch_head_seed43
+seed: 43

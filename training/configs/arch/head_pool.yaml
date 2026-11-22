@@ -1,0 +1,11 @@
+# Both: anti-aliased downsampling (pool.yaml) and the spatial 5x2x2 head (head.yaml).
+base: ../optim/adam.yaml
+name: arch_head_pool
+
+model:
+  layers:                      # 80 → 19 → 19 → 9 → 2 → 2 (5x2x2 output)
+    - {out: 16, kernel: 5, padding: 1, pool: 4}
+    - {out: 16, kernel: 3, stride: 1, padding: 1}
+    - {out: 16, kernel: 5, padding: 2, pool: 2}
+    - {out: 128, kernel: 5, padding: 0, pool: 2}
+    - {out: classes, kernel: 1}

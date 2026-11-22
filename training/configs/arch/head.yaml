@@ -1,0 +1,13 @@
+# Spatial head on the 80x80 s4 network, 20-epoch recipe of configs/optim/adam.yaml (baseline: runs
+# optim-adam and optim-adam-seed43). The last layer is a 1x1 conv on the 2x2 map: a 5x2x2 output whose
+# spike counts are summed over the 4 positions, so every position uses the same classifier weights.
+base: ../optim/adam.yaml
+name: arch_head
+
+model:
+  layers:                      # 80 → 19 → 19 → 9 → 2 → 2 (5x2x2 output)
+    - {out: 16, kernel: 7, stride: 4, padding: 1}
+    - {out: 16, kernel: 3, stride: 1, padding: 1}
+    - {out: 16, kernel: 6, stride: 2, padding: 2}
+    - {out: 128, kernel: 6, stride: 2, padding: 0}
+    - {out: classes, kernel: 1}

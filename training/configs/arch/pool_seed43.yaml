@@ -1,0 +1,4 @@
+# pool.yaml with seed 43, like optim-adam-seed43.
+base: pool.yaml
+name: arch_pool_seed43
+seed: 43
