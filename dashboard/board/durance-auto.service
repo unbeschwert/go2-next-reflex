@@ -1,0 +1,19 @@
+[Unit]
+Description=Durance AI gesture control at boot (camera -> FPGA SNN -> Go2), installed by the dashboard
+After=network-online.target spleat-server.service
+Wants=network-online.target
+ConditionPathExists=!/root/DURANCE_AUTO_DISABLE
+
+[Service]
+Type=oneshot
+# systemd starts services without HOME: ROS 2 then fails with "Failed to get logging directory"
+Environment=HOME=/root
+Environment=ROS_LOG_DIR=/tmp/ros_log
+RemainAfterExit=yes
+ExecStart=/bin/bash /root/durance_auto.sh start
+ExecStop=/bin/bash /root/durance_auto.sh stop
+TimeoutStartSec=1200
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

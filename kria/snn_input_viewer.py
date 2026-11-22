@@ -27,7 +27,7 @@ VIEW = 480                           # displayed size of the input frame (pixels
 N_OUT = 5
 LABEL_SETS = {  # second argument: which model is loaded (default: the organisers' gestures)
     "dataset": ["o0 Sit", "o1 Lay down", "o2 Hello", "o3 Dance", "o4 none"],
-    "own": ["o0 Heart", "o1 Turn left", "o2 Turn right", "o3 (unused)", "o4 none"],
+    "own": ["o0 Heart", "o1 Turn left", "o2 Turn right", "o3 Follow me", "o4 none"],
 }
 LABELS = LABEL_SETS[sys.argv[2] if len(sys.argv) > 2 else "dataset"]
 COLORS = [(40, 115, 240), (255, 190, 75), (230, 90, 215), (115, 230, 90), (150, 150, 150)]  # BGR

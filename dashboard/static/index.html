@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Durance AI</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/main.js"></script>
+</head>
+<body>
+  <noscript><p class="noscript">The Durance AI dashboard needs JavaScript (ES modules) to run.</p></noscript>
+
+  <div id="boot" class="boot" role="status">
+    <span class="logo-mark logo-mark-lg" aria-hidden="true"></span>
+    <span id="boot-text">Loading Durance AI&hellip;</span>
+  </div>
+
+  <main id="auth-screen" class="auth-screen" hidden></main>
+
+  <div id="app" class="app" hidden>
+    <a class="skip-link" href="#page">Skip to page content</a>
+
+    <aside id="sidebar" class="sidebar" aria-label="Main navigation">
+      <div class="sidebar-head">
+        <span id="logo-mark" class="logo-mark" aria-hidden="true"></span>
+        <span class="logo-text">Durance AI</span>
+        <span id="sidebar-close-slot" class="sidebar-close"></span>
+      </div>
+      <nav class="nav" aria-label="Pages">
+        <ul id="nav-list" class="nav-list"></ul>
+      </nav>
+      <div class="sidebar-foot">
+        <button id="sidebar-collapse" class="collapse-toggle" type="button" aria-expanded="true"></button>
+      </div>
+    </aside>
+    <div id="scrim" class="scrim" hidden></div>
+
+    <div class="main-col">
+      <header class="topbar">
+        <span id="nav-open-slot"></span>
+        <div class="page-title">
+          <h1 id="page-title" tabindex="-1">Durance AI</h1>
+          <p id="page-subtitle" class="page-subtitle"></p>
+        </div>
+        <div id="topbar-right" class="topbar-right"></div>
+      </header>
+
+      <div id="estop-bar" class="estop-bar" role="alert" hidden>
+        <span id="estop-bar-icon"></span>
+        <div class="estop-bar-main">
+          <div class="estop-bar-title">E-STOP active</div>
+          <div id="estop-bar-text" class="estop-bar-text"></div>
+        </div>
+        <button id="estop-clear" class="btn btn-secondary" type="button">Clear E-STOP</button>
+      </div>
+
+      <div id="conn-banner" class="conn-banner" role="alert" hidden>
+        <span id="conn-icon"></span>
+        <strong>Connection lost, retrying&hellip;</strong>
+        <span id="conn-detail" class="muted"></span>
+      </div>
+
+      <div id="alert-banner" class="alert-banner" aria-live="polite" hidden></div>
+
+      <main id="page" class="page-host" tabindex="-1"></main>
+
+      <!-- Toasts float over the top of the page area: never over the top bar / E-STOP,
+           the joystick or the drawers. -->
+      <div class="toast-layer">
+        <div id="toasts" class="toasts" aria-live="polite"></div>
+      </div>
+    </div>
+
+    <aside id="task-drawer" class="drawer" aria-labelledby="task-drawer-title" hidden>
+      <div class="drawer-head">
+        <h2 id="task-drawer-title" class="drawer-title">Tasks</h2>
+        <div class="drawer-actions">
+          <button id="task-clear" class="btn btn-ghost btn-sm" type="button">Clear finished</button>
+        </div>
+        <span id="task-close-slot"></span>
+      </div>
+      <div class="drawer-body">
+        <p id="task-count" class="muted small"></p>
+        <div id="task-list" class="task-list"></div>
+      </div>
+    </aside>
+  </div>
+</body>
+</html>

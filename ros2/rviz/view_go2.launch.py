@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 def generate_launch_description():
     with open(os.path.join(HERE, "go2.urdf")) as f:
-        urdf = f.read()
+        urdf = f.read().replace("@MESHES@", os.path.join(HERE, "meshes"))   # placeholder form of go2.urdf
     return LaunchDescription([
         Node(package="robot_state_publisher", executable="robot_state_publisher",
              parameters=[{"robot_description": urdf}], output="log"),
