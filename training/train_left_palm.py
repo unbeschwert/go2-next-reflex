@@ -14,7 +14,7 @@ from torch.nn import functional as F
 from event_data import SIZE, decode_recording
 from labeling.benchmark_left_palm import WINDOW_US, event_images, read_labels, track
 from training.data import GRID, bin_events
-from training.model import GestureSNN
+from training.model import PARAMETER_FORMATS, GestureSNN
 from training.train import resample_event_counts
 
 
@@ -128,7 +128,8 @@ def measure(errors):
 
 def run(args):
     torch.set_num_threads(args.threads)
-    model_args = {**MODEL_ARGS, "grid": args.grid, "precision": args.precision}
+    model_args = {**MODEL_ARGS, "grid": args.grid, "precision": args.precision,
+                  "parameter_format": args.parameter_format}
     styles = load_recordings(args.archive, args.labels, args.grid)
     all_errors = {method: [] for method in METHODS}
     all_snn_errors = []
@@ -159,6 +160,7 @@ def run(args):
         "input_ms": CONTEXT_STEPS * BIN_US // 1000,
         "grid": args.grid,
         "precision": args.precision,
+        "parameter_format": args.parameter_format if args.precision == "qat" else "fp32",
         "epochs": args.epochs,
         "seed": args.seed,
         "folds": folds,
@@ -189,10 +191,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", type=Path, default=Path("go2_gestures_s20.zip"))
     parser.add_argument("--labels", type=Path, default=Path("labeling/session20_left_palm.csv"))
-    parser.add_argument("--output", type=Path, default=Path(".local/training/left-palm-snn"))
+    parser.add_argument("--output", type=Path, default=Path(".local/training/left-palm-snn-40-q26"))
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--grid", type=int, choices=(32, 40), default=32)
-    parser.add_argument("--precision", choices=("fp32", "qat"), default="fp32")
+    parser.add_argument("--grid", type=int, choices=(32, 40), default=40)
+    parser.add_argument("--precision", choices=("fp32", "qat"), default="qat")
+    parser.add_argument("--parameter-format", choices=PARAMETER_FORMATS, default="q2.6",
+                        help="Weight and bias encoding in QAT builds")
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--threads", type=int, default=4)
     args = parser.parse_args()

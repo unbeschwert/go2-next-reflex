@@ -1,4 +1,4 @@
-"""Run the INT8 palm model on a recording or a stream of binned event counts."""
+"""Run the quantized palm model on a recording or a stream of binned event counts."""
 
 import argparse
 from collections import deque
@@ -15,7 +15,7 @@ from training.data import bin_events
 from training.export_left_palm import load_model
 
 
-DEFAULT_MODEL = Path(__file__).resolve().parents[1] / "models" / "left-palm-40-int8.json"
+DEFAULT_MODEL = Path(__file__).resolve().parents[1] / "models" / "left-palm-40-q26.json"
 
 
 def recording_bins(raw, name, bin_us, grid):

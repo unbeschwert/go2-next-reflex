@@ -140,9 +140,9 @@ Upload `movement_model.json` to RiverSDK to build the firmware. The board loads 
 
 ## 40×40 left-palm forecast
 
-The model uses four 25 ms event bins on a 40×40 grid to forecast the performer's left palm in the following 50 ms window. The output is in native 320×320 camera pixels. The portable model contains 7,152 signed INT8 weights for the convolution and coordinate readout layers, plus FP32 channel scales and biases. PyTorch dequantizes weights for replay and uses the quantized input and membrane simulation from training.
+The model uses four 25 ms event bins on a 40×40 grid to forecast the performer's left palm in the following 50 ms window. The output is in native 320×320 camera pixels. The default export stores all 7,152 weights and 50 biases as signed Q2.6 codes with a fixed scale of 1/64. The laptop bridge unpacks those codes and runs the quantized input and membrane simulation in PyTorch.
 
-The pilot uses [85 visible palm annotations](../labeling/session20_left_palm.csv) across six clips from one Session 20 performer. The two evaluation folds hold out one whole clip per motion style. Across all 76 held-out forecast windows, the median error was 14.2 px and 64 predictions landed within 30 px (84%). The two-fold [results](../models/left-palm-40-metrics.json) include a separate comparison on 63 windows with hand-labeled inputs for the motion baselines. The [exported model](../models/left-palm-40-int8.json) was refit on all six clips after evaluation.
+The pilot uses [85 visible palm annotations](../labeling/session20_left_palm.csv) across six clips from one Session 20 performer. The two evaluation folds hold out one whole clip per motion style. Across all 76 held-out forecast windows, the Q2.6 model had a median error of 16.1 px and 63 predictions landed within 30 px (82.9%). The two-fold [results](../models/left-palm-40-q26-metrics.json) include a separate comparison on 63 windows with hand-labeled inputs for the motion baselines. The [exported Q2.6 model](../models/left-palm-40-q26.json) was refit on all six clips after evaluation.
 
 ### Architecture and sources
 
@@ -177,16 +177,16 @@ Pass `--ros-topic /left_palm/forecast` from a ROS 2 environment with `rclpy` and
 
 ### Reproduce training and export
 
-Training also requires SciPy for the seeded-tracker baseline. The replay path does not import SciPy.
+Training also requires SciPy for the seeded-tracker baseline. The replay path does not import SciPy. The trainer defaults to 40×40 with Q2.6 quantization-aware training.
 
 ```sh
-python -m training.train_left_palm --grid 40 --precision qat --output .local/training/left-palm-snn-40-qat
-python -m training.export_left_palm --checkpoint .local/training/left-palm-snn-40-qat/left-palm-snn.pt --output models/left-palm-40-int8.json
+python -m training.train_left_palm
+python -m training.export_left_palm --checkpoint .local/training/left-palm-snn-40-q26/left-palm-snn.pt --output models/left-palm-40-q26.json
 ```
 
 ### Software quantization results
 
-The [software experiment](../models/left-palm-40-q26-comparison.json) compared Q2.6 conversion, Q2.6-aware training, and the laptop model on the same 76 held-out windows. It kept the input and membrane simulation fixed. The results describe PyTorch replay accuracy.
+The [software experiment](../models/left-palm-40-q26-comparison.json) compared Q2.6 conversion, Q2.6-aware training, and the earlier per-channel INT8 baseline on the same 76 held-out windows. It kept the input and membrane simulation fixed. Replay the earlier baseline with `--model models/left-palm-40-int8.json`.
 
 | Weight encoding | Within 30 px | Median error | 90th-percentile error |
 |---|---:|---:|---:|
@@ -196,7 +196,7 @@ The [software experiment](../models/left-palm-40-q26-comparison.json) compared Q
 
 ### Kria test plan
 
-The existing 40×40 gesture bitstream uses signed Q2.6 weights and biases, Q4.12 membrane potentials, hard reset on spikes, and five binary spike outputs. Q2.6 is the weight format for board tests against this bitstream. The current palm model uses a two-coordinate linear head and time pooling, both implemented in the laptop runtime.
+The existing 40×40 gesture bitstream uses signed Q2.6 weights and biases, Q4.12 membrane potentials, hard reset on spikes, and five binary spike outputs. The exported palm model shares its parameter encoding. Its software membrane simulation, subtractive reset, time pooling, and linear coordinate readout require a native model and matching firmware before FPGA replay.
 
 1. Define a spiking coordinate readout and confirm the exact layer graph and input and output shapes against the target bitstream. A graph change requires a matching RiverSDK firmware build.
 2. Train with the target Q2.6 and Q4.12 formats, spike reset behavior, and continuous state between frames. Match the camera bin duration, polarity order, and event scaling used for board replay.

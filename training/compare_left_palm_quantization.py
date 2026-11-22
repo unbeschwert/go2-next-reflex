@@ -2,49 +2,21 @@
 
 import argparse
 import copy
-from contextlib import nullcontext
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import numpy as np
 import torch
-from torch import nn
-from torch.nn.utils import parametrize
 
-from training import model as model_module
 from training import train_left_palm as trainer
+from training.model import Q26_SCALE
 
 REFERENCE = Path("models/left-palm-40-metrics.json")
-SCALE = 1.0 / 64
 
 
-def fixed_q26(values):
-    return torch.fake_quantize_per_tensor_affine(values, SCALE, 0, -128, 127)
-
-
-class Q26Bias(nn.Module):
-    def forward(self, bias):
-        return fixed_q26(bias)
-
-
-def use_q26_bias(model):
-    for layer in (*model.convolutions, model.classifier):
-        parametrize.register_parametrization(layer, "bias", Q26Bias())
-    return model
-
-
-class Q26SNN(model_module.GestureSNN):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        use_q26_bias(self)
-
-
-def score(model, clips, fixed):
-    context = patch.object(model_module, "quantized_weight", fixed_q26) if fixed else nullcontext()
-    with context:
-        errors = [torch.linalg.vector_norm(trainer.predict(model, clip.frames) - clip.targets, dim=1).numpy()
-                  for clip in clips]
+def score(model, clips):
+    errors = [torch.linalg.vector_norm(trainer.predict(model, clip.frames) - clip.targets, dim=1).numpy()
+              for clip in clips]
     return np.concatenate(errors), np.concatenate([clip.comparable.numpy() for clip in clips])
 
 
@@ -69,12 +41,13 @@ def compare(archive, labels, output_path):
         seed = reference["seed"] + index
         print(f"Fold {index + 1} / per-channel baseline", flush=True)
         baseline = trainer.fit(train, reference["epochs"], seed, model_args)
-        original, comparable = score(baseline, test, fixed=False)
-        converted, _ = score(use_q26_bias(copy.deepcopy(baseline)), test, fixed=True)
+        original, comparable = score(baseline, test)
+        converted_model = copy.deepcopy(baseline)
+        converted_model.parameter_format = "q2.6"
+        converted, _ = score(converted_model, test)
         print(f"Fold {index + 1} / Q2.6-aware training", flush=True)
-        with patch.object(trainer, "GestureSNN", Q26SNN), patch.object(model_module, "quantized_weight", fixed_q26):
-            fixed = trainer.fit(train, reference["epochs"], seed, model_args)
-        retrained, _ = score(fixed, test, fixed=True)
+        fixed = trainer.fit(train, reference["epochs"], seed, {**model_args, "parameter_format": "q2.6"})
+        retrained, _ = score(fixed, test)
         masks.append(comparable)
         errors = dict(zip(cases, (original, converted, retrained)))
         for case, values in errors.items():
@@ -85,9 +58,9 @@ def compare(archive, labels, output_path):
 
     comparable = np.concatenate(masks)
     all_errors = {case: np.concatenate(values) for case, values in all_errors.items()}
-    signed_range = [-128 * SCALE, 127 * SCALE]
+    signed_range = [-128 * Q26_SCALE, 127 * Q26_SCALE]
     output = {
-        "grid": 40, "horizon_ms": 50, "q2_6_scale": SCALE, "q2_6_range": signed_range,
+        "grid": 40, "horizon_ms": 50, "q2_6_scale": Q26_SCALE, "q2_6_range": signed_range,
         "q2_6_parameters": ["convolution weights", "convolution biases", "readout weights", "readout biases"],
         "input_and_membrane": "unchanged software simulation",
         "all_labeled_targets": {case: summary(values) for case, values in all_errors.items()},
