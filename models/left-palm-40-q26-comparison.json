@@ -1,0 +1,170 @@
+{
+  "grid": 40,
+  "horizon_ms": 50,
+  "q2_6_scale": 0.015625,
+  "q2_6_range": [
+    -2.0,
+    1.984375
+  ],
+  "q2_6_parameters": [
+    "convolution weights",
+    "convolution biases",
+    "readout weights",
+    "readout biases"
+  ],
+  "input_and_membrane": "unchanged software simulation",
+  "all_labeled_targets": {
+    "per_channel_int8_qat": {
+      "forecasts": 76,
+      "median_px": 14.220093727111816,
+      "p90_px": 38.11891174316406,
+      "mean_px": 17.729141235351562,
+      "max_px": 65.26618957519531,
+      "within_10_px": 0.35526315789473684,
+      "within_30_px": 0.8421052631578947,
+      "count_within_30_px": 64
+    },
+    "q2_6_post_training_conversion": {
+      "forecasts": 76,
+      "median_px": 14.002768516540527,
+      "p90_px": 35.410675048828125,
+      "mean_px": 18.179874420166016,
+      "max_px": 69.26150512695312,
+      "within_10_px": 0.2631578947368421,
+      "within_30_px": 0.8157894736842105,
+      "count_within_30_px": 62
+    },
+    "q2_6_qat": {
+      "forecasts": 76,
+      "median_px": 16.063133239746094,
+      "p90_px": 40.089569091796875,
+      "mean_px": 19.812301635742188,
+      "max_px": 71.42489624023438,
+      "within_10_px": 0.21052631578947367,
+      "within_30_px": 0.8289473684210527,
+      "count_within_30_px": 63
+    }
+  },
+  "baseline_comparable_targets": {
+    "per_channel_int8_qat": {
+      "forecasts": 63,
+      "median_px": 13.165546417236328,
+      "p90_px": 32.98719024658203,
+      "mean_px": 16.26323699951172,
+      "max_px": 43.34559631347656,
+      "within_10_px": 0.38095238095238093,
+      "within_30_px": 0.8571428571428571,
+      "count_within_30_px": 54
+    },
+    "q2_6_post_training_conversion": {
+      "forecasts": 63,
+      "median_px": 13.978219985961914,
+      "p90_px": 33.49542236328125,
+      "mean_px": 16.74431610107422,
+      "max_px": 39.83501052856445,
+      "within_10_px": 0.23809523809523808,
+      "within_30_px": 0.8412698412698413,
+      "count_within_30_px": 53
+    },
+    "q2_6_qat": {
+      "forecasts": 63,
+      "median_px": 15.311861991882324,
+      "p90_px": 37.157264709472656,
+      "mean_px": 18.40768051147461,
+      "max_px": 46.679256439208984,
+      "within_10_px": 0.2222222222222222,
+      "within_30_px": 0.8412698412698413,
+      "count_within_30_px": 53
+    }
+  },
+  "folds": [
+    {
+      "train": [
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-normal-32.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-fast-32.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-large-32.bin"
+      ],
+      "test": [
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-normal-09.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-fast-09.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-large-09.bin"
+      ],
+      "metrics": {
+        "per_channel_int8_qat": {
+          "forecasts": 35,
+          "median_px": 8.909552574157715,
+          "p90_px": 16.484764099121094,
+          "mean_px": 9.756633758544922,
+          "max_px": 20.08620262145996,
+          "within_10_px": 0.6,
+          "within_30_px": 1.0,
+          "count_within_30_px": 35
+        },
+        "q2_6_post_training_conversion": {
+          "forecasts": 35,
+          "median_px": 10.684392929077148,
+          "p90_px": 18.536972045898438,
+          "mean_px": 10.749979019165039,
+          "max_px": 29.151811599731445,
+          "within_10_px": 0.4,
+          "within_30_px": 1.0,
+          "count_within_30_px": 35
+        },
+        "q2_6_qat": {
+          "forecasts": 35,
+          "median_px": 11.024121284484863,
+          "p90_px": 21.527294158935547,
+          "mean_px": 13.123356819152832,
+          "max_px": 29.491788864135742,
+          "within_10_px": 0.37142857142857144,
+          "within_30_px": 1.0,
+          "count_within_30_px": 35
+        }
+      }
+    },
+    {
+      "train": [
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-normal-09.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-fast-09.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-large-09.bin"
+      ],
+      "test": [
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-normal-32.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-fast-32.bin",
+        "motion_buddy_dataset/20/gesture_02-turn-left-360-large-32.bin"
+      ],
+      "metrics": {
+        "per_channel_int8_qat": {
+          "forecasts": 41,
+          "median_px": 23.35743522644043,
+          "p90_px": 40.87064743041992,
+          "mean_px": 24.534942626953125,
+          "max_px": 65.26618957519531,
+          "within_10_px": 0.14634146341463414,
+          "within_30_px": 0.7073170731707317,
+          "count_within_30_px": 29
+        },
+        "q2_6_post_training_conversion": {
+          "forecasts": 41,
+          "median_px": 23.346908569335938,
+          "p90_px": 38.49208450317383,
+          "mean_px": 24.522470474243164,
+          "max_px": 69.26150512695312,
+          "within_10_px": 0.14634146341463414,
+          "within_30_px": 0.6585365853658537,
+          "count_within_30_px": 27
+        },
+        "q2_6_qat": {
+          "forecasts": 41,
+          "median_px": 21.55117416381836,
+          "p90_px": 43.51759719848633,
+          "mean_px": 25.522371292114258,
+          "max_px": 71.42489624023438,
+          "within_10_px": 0.07317073170731707,
+          "within_30_px": 0.6829268292682927,
+          "count_within_30_px": 28
+        }
+      }
+    }
+  ]
+}

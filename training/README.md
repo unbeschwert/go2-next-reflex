@@ -165,6 +165,18 @@ python -m training.train_left_palm --grid 40 --precision qat --output .local/tra
 python -m training.export_left_palm --checkpoint .local/training/left-palm-snn-40-qat/left-palm-snn.pt --output models/left-palm-40-int8.json
 ```
 
+### Q2.6 comparison
+
+The experiment used the same 76 held-out windows, initialization seeds, and training settings for each fold. Q2.6 uses one byte per weight and bias, a scale of 1/64, and the signed range −2 to 1.984375. The comparison keeps the input and membrane simulation fixed.
+
+| Weight encoding | Within 30 px | Median error | 90th-percentile error |
+|---|---:|---:|---:|
+| Per-channel INT8 with quantization-aware training | 64/76 (84.2%) | 14.2 px | 38.1 px |
+| Q2.6 conversion after training | 62/76 (81.6%) | 14.0 px | 35.4 px |
+| Q2.6 with quantization-aware training | 63/76 (82.9%) | 16.1 px | 40.1 px |
+
+Run `python -m training.compare_left_palm_quantization` to reproduce the [comparison](../models/left-palm-40-q26-comparison.json) in PyTorch.
+
 ### Kria deployment status
 
 The JSON bundle targets the laptop PyTorch runtime. RiverSDK firmware requires a supported spiking output head, a native RiverOps architecture export and matching `weights.txt`. The current two-coordinate linear head and time pooling run in software. Native deployment needs an FPGA-compatible readout or a bridge that can read the FPGA feature maps, followed by RiverOps replay and an on-board timing check. The RiverOps SDK and live board were unavailable for this pilot.
