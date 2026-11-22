@@ -144,6 +144,25 @@ The model uses four 25 ms event bins on a 40×40 grid to forecast the performer'
 
 The pilot uses [85 visible palm annotations](../labeling/session20_left_palm.csv) across six clips from one Session 20 performer. The two evaluation folds hold out one whole clip per motion style. Across all 76 held-out forecast windows, the median error was 14.2 px and 64 predictions landed within 30 px (84%). The two-fold [results](../models/left-palm-40-metrics.json) include a separate comparison on 63 windows with hand-labeled inputs for the motion baselines. The [exported model](../models/left-palm-40-int8.json) was refit on all six clips after evaluation.
 
+### Architecture and sources
+
+The palm trainer adapts the compact `GestureSNN` from this repository. It keeps the three convolutional leaky integrate-and-fire (Conv-LIF) stages and the early/late spike pooling, expands the event grid to 40×40, and trains a two-value regression readout on the Session 20 palm labels. [Original gesture model at `bb21c11`](https://github.com/unbeschwert/go2-next-reflex/blob/bb21c111ff5feed96dfcefbc0c19e2f24bcc052b/training/model.py)
+
+| Stage | Shape per forecast | Operation |
+|---|---|---|
+| Input | `4 × 2 × 40 × 40` | Four 25 ms bins of OFF and ON event counts. Cap counts at 63 and encode them as `log(1 + count) / log(64)`. |
+| Conv-LIF 1 | `4 × 8 × 20 × 20` | 3×3 convolution, stride 2, padding 1, followed by LIF neurons. |
+| Conv-LIF 2 | `4 × 16 × 10 × 10` | Same kernel, stride, and padding. |
+| Conv-LIF 3 | `4 × 24 × 5 × 5` | Same kernel, stride, and padding. |
+| Temporal pooling | `1200` | Average spikes for the first two and last two steps separately, then concatenate and flatten. |
+| Linear readout | `2` | Predict normalized palm coordinates. Convert each output `v` to camera pixels with `80 × v + 160`. |
+
+Membrane state starts at zero for each forecast and carries across its four input bins. A neuron subtracts its firing threshold on a spike. Training uses a surrogate gradient at the spike threshold and mean squared error on the normalized coordinates. The labeled target comes from the 50 ms window immediately after the input bins. The model has 7,202 trainable parameters, comprising 7,152 weights and 50 biases.
+
+Neftci, Mostafa, and Zenke describe the surrogate-gradient method used to train spiking networks with binary spike outputs. [Surrogate Gradient Learning in Spiking Neural Networks, 2019](https://arxiv.org/abs/1901.09948)
+
+Rudnev et al. provide related work on estimating hand pose from an event stream. The palm pilot learns its 2D forecast from the Session 20 labels. [EventHands, ICCV 2021](https://openaccess.thecvf.com/content/ICCV2021/papers/Rudnev_EventHands_Real-Time_Neural_3D_Hand_Pose_Estimation_From_an_Event_ICCV_2021_paper.pdf)
+
 ### Replay the model
 
 Run from the repository root with Python, NumPy and PyTorch. Keep `go2_gestures_s20.zip` in the repository root for archive replay, or use `--recording` with a local one-second event capture.
