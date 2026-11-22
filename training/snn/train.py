@@ -200,6 +200,30 @@ def describe_optimizer(optimizer) -> str:
     return f"optimizer: {type(optimizer).__name__} ({groups})"
 
 
+def recompute_bn(model, data: SplitData, cfg: Config, augment: bool = True) -> int:
+    """Recompute every BatchNorm layer's running mean/variance for the current weights, as SWA does
+    (torch.optim.swa_utils.update_bn): reset them, then one pass over the training data in training mode
+    with momentum=None, so each statistic is the plain average over all batches. Batches are made like
+    training batches (same augmentation, warm-start prefix and mixup), because that is the input the
+    averaged weights were trained on. Averaging the stored statistics of several epochs is only an
+    approximation: each epoch's statistics belong to that epoch's weights. Returns the number of layers."""
+    layers = [m for m in model.modules() if isinstance(m, nn.modules.batchnorm._BatchNorm)]
+    momenta = [m.momentum for m in layers]
+    for m in layers:
+        m.reset_running_stats()
+        m.momentum = None
+    was_training = model.training
+    model.train()
+    with torch.no_grad():
+        for index in torch.randperm(len(data), device=data.y.device).split(cfg.train.batch_size):
+            x, _, warmup, _ = data.batch(index, augment=augment)
+            model(x, warmup=warmup)
+    for m, momentum in zip(layers, momenta):
+        m.momentum = momentum
+    model.train(was_training)
+    return len(layers)
+
+
 def fit(model, train: SplitData, val: SplitData, cfg: Config, *, epochs: int, lr: float, phase: str,
         clamp: float | None, history: list, run_dir: Path, augment: bool = True, after_step=None,
         schedule=None, average_last: int = 0):
@@ -240,9 +264,14 @@ def fit(model, train: SplitData, val: SplitData, cfg: Config, *, epochs: int, lr
         reference = model.state_dict()
         model.load_state_dict({k: (v / averaged).to(reference[k].dtype) if reference[k].is_floating_point() else v
                                for k, v in average.items()})
+        note = ""
+        if cfg.train.recompute_bn:
+            stale = run_epoch(model, val, cfg)["acc"]
+            n = recompute_bn(model, train, cfg, augment=augment)
+            note = f"; BatchNorm statistics recomputed for {n} layers (with averaged statistics: {stale:.1%})"
         va = run_epoch(model, val, cfg)
         print(f"[{phase}] average of the last {averaged} epochs: val acc {va['acc']:.1%} "
-              f"(best single epoch was {best_acc:.1%}; the average is used)", flush=True)
+              f"(best single epoch was {best_acc:.1%}; the average is used{note})", flush=True)
         return model, va["acc"]
     model.load_state_dict(best_state)
     return model, best_acc

@@ -47,6 +47,10 @@ Val / test accuracy in %. Unless noted: batch 32, constant lr 3e-3, weight decay
 | 20 | `motion-buddy-80-v3-s4` | 11-22 00:39 | v3 at **80×80**, first layer k7 s4 | = #14 (40 epochs) | v3 set, ±8 px | = #14 | 78.6 / 74.4 | 78.4 / 72.6 |
 | 21 | `motion-buddy-80-v3-s4-adamw` | 11-22 00:42 | = #20 | = #20 with **AdamW**, weight decay 1e-2 on conv weights only | = #20 | = #14 | 80.1 / 64.7 | 78.6 / 67.7 |
 | 22 | `motion-buddy-80-v3-s4-ce` | 11-22 00:48 | = #20 | = #20 with **loss ce+mse** (τ 10, MSE weight 1) | = #20 | = #14 | 77.6 / 69.5 | 76.8 / 69.4 |
+| 23 | `optim-adam` | 11-22 04:26 | 80×80 s4 | **20 epochs**, cosine over 15, average of last 5, decay on conv weights only, Adam 1e-4 | v3 set, ±8 px | = #14 | 71.0 / 66.7 | 71.9 / 66.8 |
+| 24 | `optim-adam-seed43` | 11-22 04:26 | = #23 | = #23, **seed 43** | = #23 | = #14 | 77.6 / 59.6 | 76.6 / 59.5 |
+| 25 | `optim-adamw-1e-2` | 11-22 04:26 | = #23 | = #23 with AdamW 1e-2 | = #23 | = #14 | 73.1 / 67.4 | 73.9 / 65.8 |
+| 26 | `optim-adamw-1e-1` | 11-22 04:26 | = #23 | = #23 with AdamW 1e-1 | = #23 | = #14 | 72.9 / 67.2 | 72.9 / 69.0 |
 
 Rows 3, 10–13 and 15 re-quantize an existing float model with `remote/qat.sh`, so their float numbers are those of the run they start from.
 
@@ -83,6 +87,10 @@ What each augmentation does: [data-augmentation.md](data-augmentation.md).
 | #20 `motion-buddy-80-v3-s4` | 77.6 | 79.3 | 83.3 | 62.0 | sit P14 35 % (28 test sit clips → dance), hello P14 39 % |
 | #21 `motion-buddy-80-v3-s4-adamw` | 76.5 | 81.0 | 78.3 | 57.3 | no-action (P13 57 %, P14 55 %; 50 test clips → sit), sit P14 31 % |
 | #22 `motion-buddy-80-v3-s4-ce` | 75.7 | 78.0 | 81.2 | 57.7 | sit predicted too often (99 of 555 test clips wrongly → sit), hello P14 30 % |
+| #23 `optim-adam` | 67.1 | 77.2 | 76.8 | 57.0 | sit P14 31 %, hello P14 26 %, dance 41 % |
+| #24 `optim-adam-seed43` | 74.5 | 78.9 | 70.3 | 48.7 | sit P14 0 %, hello P14 18 % |
+| #25 `optim-adamw-1e-2` | 69.4 | 78.9 | 74.3 | 57.3 | sit P14 37 %, hello 33–41 % |
+| #26 `optim-adamw-1e-1` | 71.8 | 74.1 | 76.1 | 62.0 | sit P14 12 % |
 
 `scripts/eval_per_person.py runs/<run>` prints this plus the per-class recall and confusion matrix. For #9 in float: P13 78 %, P14 62 %, dance recall 93 %, sit weak for P14.
 
@@ -113,6 +121,10 @@ What each augmentation does: [data-augmentation.md](data-augmentation.md).
 **Summary of #20–#22:** on the 80×80 s4 network, the notebook's Adam + MSE is the best of the three. None of these beat the 40×40 v3 (#14) on test.
 
 Assumptions in #14 (the notebook isn't in the repo): dropout after layers 1–3, the augmentation probabilities, mixup α 0.4, cosine over the first 30 epochs.
+
+**#23–#26: optimizer comparison, and the first measurement of run-to-run noise.** Two identical Adam runs that differ only in the random seed (#23, #24) end **4.7 points apart on val and 7.3 points apart on test** (66.8 vs 59.5 %); seed 43 never learnt *sit* for person 14 (0 %). Both AdamW runs (65.8 and 69.0 % test) fall inside that spread, so at 20 epochs there is **no measurable optimizer effect**. The bigger lesson: on 2 test people a single run is uncertain by several points, so the earlier single-seed comparisons that differ by 2–4 points (#14 vs #15, #16, #20, #22) are not conclusive either. Comparisons need 2–3 seeds per setting, or the mean over seeds.
+
+**Weight averaging and BatchNorm (2026-11-22).** Every run with `average_last` up to here (#14–#22, and the four `optim-*` runs, which started before the change) averaged BatchNorm's stored running statistics along with the weights. That is only an approximation: each epoch's statistics belong to that epoch's weights. From the next runs on, the statistics are recomputed for the averaged weights with one pass over the training data (`train.recompute_bn`, as in SWA), and the log shows val accuracy with both.
 
 ## Open questions and next runs
 

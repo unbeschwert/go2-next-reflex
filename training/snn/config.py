@@ -193,6 +193,9 @@ class TrainConfig:
     # Weight averaging: the final float model is the average of the last N epochs' weights instead of
     # the single epoch with the best validation accuracy (0 = best epoch, as before).
     average_last: int = 0
+    # With average_last: recompute the BatchNorm running statistics for the averaged weights (one pass
+    # over the training data, as SWA) instead of averaging the stored statistics of those epochs.
+    recompute_bn: bool = True
     # adam: weight decay added to the gradient (L2, as the reference notebook). adamw: decoupled decay.
     # Not equivalent strengths: Adam's 1e-4 is divided by the (small) gradient, so it matched AdamW 1e-2
     # in layers 0-1 but was ~15x stronger in layer 3 (doc/training-log.md, run #21).
