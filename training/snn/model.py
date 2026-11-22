@@ -15,9 +15,15 @@ class LayerShape:
     out_c: int
     out_h: int
     out_w: int
-    kernel: int
-    stride: int
+    kernel: int        # as on the FPGA: with pooling, the fused kernel (conv kernel + pool - 1)
+    stride: int        # as on the FPGA: with pooling, the pool size
     padding: int
+    pool: int = 1      # avg-pool size in training (1 = none); the conv itself then has stride 1
+
+    @property
+    def conv_kernel(self) -> int:
+        """Kernel of the trained conv (before folding the avg-pool into it)."""
+        return self.kernel - self.pool + 1
 
     @property
     def weights(self) -> int:
@@ -36,52 +42,73 @@ def layer_shapes(cfg: Config) -> list[LayerShape]:
         out = cfg.n_classes if layer.out == "classes" else layer.out
         if not isinstance(out, int) or out < 1:
             raise ConfigError(f"model.layers[{i}].out must be a positive int or 'classes'")
-        k, s, p = layer.kernel, layer.stride, layer.padding
-        if not all(isinstance(v, int) for v in (k, s, p)) or k < 1 or s < 1 or p < 0:
-            raise ConfigError(f"model.layers[{i}]: kernel/stride must be >= 1 and padding >= 0 "
+        k, s, p, pool = layer.kernel, layer.stride, layer.padding, layer.pool
+        if not all(isinstance(v, int) for v in (k, s, p, pool)) or k < 1 or s < 1 or p < 0 or pool < 1:
+            raise ConfigError(f"model.layers[{i}]: kernel/stride/pool must be >= 1 and padding >= 0 "
                               "(only square kernels/strides and integer padding can be exported)")
-        oh, ow = (h + 2 * p - k) // s + 1, (w + 2 * p - k) // s + 1
+        if pool > 1 and s != 1:
+            raise ConfigError(f"model.layers[{i}]: pool needs stride 1 (riverops folds conv + avg-pool "
+                              "exactly only for a stride-1 conv); the pool does the downsampling")
+        # With pooling, the FPGA runs one conv of kernel k + pool - 1 and stride pool; its output size
+        # equals the conv's (stride 1) output pooled by `pool`.
+        k_fpga, s_fpga = (k + pool - 1, pool) if pool > 1 else (k, s)
+        oh, ow = (h + 2 * p - k_fpga) // s_fpga + 1, (w + 2 * p - k_fpga) // s_fpga + 1
         if oh < 1 or ow < 1:
-            raise ConfigError(f"model.layers[{i}]: kernel {k} does not fit a {h}x{w} input")
-        shapes.append(LayerShape(i, c, h, w, out, oh, ow, k, s, p))
+            raise ConfigError(f"model.layers[{i}]: kernel {k_fpga} does not fit a {h}x{w} input")
+        shapes.append(LayerShape(i, c, h, w, out, oh, ow, k_fpga, s_fpga, p, pool))
         c, h, w = out, oh, ow
     last = shapes[-1]
-    if (last.out_c, last.out_h, last.out_w) != (cfg.n_classes, 1, 1):
-        hint = (f" The last layer sees a {last.in_h}x{last.in_w} input: use kernel={last.in_h}, padding=0, "
-                "or shrink earlier.") if last.out_h != 1 else ""
-        raise ConfigError(f"the output must be {cfg.n_classes}x1x1 (one neuron per class, as spleat-server "
-                          f"expects), but the last layer gives {last.out_c}x{last.out_h}x{last.out_w}.{hint}")
+    if last.out_c != cfg.n_classes:
+        raise ConfigError(f"the last layer must have one channel per class ({cfg.n_classes}, out: classes), "
+                          f"got {last.out_c}")
+    # The output may be a classes x H x W map: the score of a class is its spike count summed over time
+    # and over the H x W positions (done in software, on the board too), which makes the head
+    # translation-invariant. H = W = 1 is the classic one-neuron-per-class output.
     return shapes
+
+
+def has_pooling(cfg: Config) -> bool:
+    return any(layer.pool > 1 for layer in cfg.model.layers)
 
 
 def describe(shapes: list[LayerShape]) -> str:
     rows = ["  layer  input        kernel/stride/pad  output       weights   neurons"]
     for s in shapes:
-        rows.append(f"  {s.index:5d}  {s.in_c:3d}x{s.in_h:3d}x{s.in_w:<3d}  {s.kernel:2d}/{s.stride}/{s.padding}"
-                    f"             {s.out_c:3d}x{s.out_h:3d}x{s.out_w:<3d}  {s.weights:8,d}  {s.neurons:7,d}")
+        geometry = f"{s.kernel:2d}/{s.stride}/{s.padding}"
+        if s.pool > 1:
+            geometry += f" (k{s.conv_kernel}+pool{s.pool})"
+        rows.append(f"  {s.index:5d}  {s.in_c:3d}x{s.in_h:3d}x{s.in_w:<3d}  {geometry:<17s}  "
+                    f"{s.out_c:3d}x{s.out_h:3d}x{s.out_w:<3d}  {s.weights:8,d}  {s.neurons:7,d}")
     rows.append(f"  total weights {sum(s.weights for s in shapes):,}, neurons {sum(s.neurons for s in shapes):,}")
     return "\n".join(rows)
 
 
 def build_model(cfg: Config, dropout: bool = False):
-    """riverops model: a stack of SpikingConvBN2d; forward returns spike counts per class [B, N].
+    """riverops model: a stack of SpikingConvBN2d (SpikingConvBNAvgPool2d for layers with `pool`);
+    forward returns spike counts per class [B, N], summed over time and over the output map's positions.
 
-    dropout=True (float training only) uses SpikingConvBNDropout2d for model.dropout_layers. Dropout has no
+    dropout=True (float training only) uses the Dropout variants for model.dropout_layers. Dropout has no
     parameters, so the state_dict is the same either way: quantization and export rebuild the model
     without it (riverops can't export the dropout layer type)."""
     from torch import nn
-    from riverops.nn import SpikingConvBN2d
-    from riverops.nn.spiking_conv import SpikingConvBNDropout2d
+    from riverops.nn import SpikingConvBN2d, SpikingConvBNAvgPool2d
+    from riverops.nn.spiking_conv import SpikingConvBNDropout2d, SpikingConvBNDropoutAvgPool2d
 
     neuron = cfg.model.neuron
     model_cfg = cfg.model
 
     def layer(s):
-        common = dict(kernel_size=s.kernel, stride=s.stride, padding=s.padding, bias=False,
-                      first_layer=s.index == 0, initial_tau=neuron.initial_tau,
+        common = dict(kernel_size=s.conv_kernel, stride=1 if s.pool > 1 else s.stride, padding=s.padding,
+                      bias=False, first_layer=s.index == 0, initial_tau=neuron.initial_tau,
                       learnable_leak=neuron.learnable_leak, v_threshold=neuron.v_threshold,
                       reset_mode=neuron.reset_mode)
-        if dropout and model_cfg.dropout and s.index in model_cfg.dropout_layers:
+        drop = dropout and model_cfg.dropout and s.index in model_cfg.dropout_layers
+        if s.pool > 1:
+            common["pool_kernel_size"] = s.pool
+            if drop:
+                return SpikingConvBNDropoutAvgPool2d(s.in_c, s.out_c, dropout_p=model_cfg.dropout, **common)
+            return SpikingConvBNAvgPool2d(s.in_c, s.out_c, **common)
+        if drop:
             return SpikingConvBNDropout2d(s.in_c, s.out_c, dropout_p=model_cfg.dropout, **common)
         return SpikingConvBN2d(s.in_c, s.out_c, **common)
 
@@ -91,7 +118,8 @@ def build_model(cfg: Config, dropout: bool = False):
             self.net = nn.Sequential(*[layer(s) for s in layer_shapes(cfg)])
 
         def forward(self, x, warmup: int = 0):   # x: [B, warmup + T, 2, H, W]
-            # Spikes during a warm-start prefix (training augmentation) are not counted.
-            return self.net(x)[:, warmup:].sum(dim=1).flatten(start_dim=1)
+            # Spikes during a warm-start prefix (training augmentation) are not counted. Summing over the
+            # output positions (dims 2, 3 after the time sum) is the same as flatten for a 1x1 output.
+            return self.net(x)[:, warmup:].sum(dim=1).sum(dim=(2, 3))
 
     return SpikingClassifier()

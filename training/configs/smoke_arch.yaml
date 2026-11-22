@@ -1,0 +1,11 @@
+# Tiny end-to-end check of avg-pool downsampling + the spatial head at 40x40 (see configs/arch/).
+base: smoke_v3.yaml
+name: smoke_arch
+
+model:
+  layers:                      # 40 → 19 → 19 → 9 → 2 → 2 (5x2x2 output)
+    - {out: 16, kernel: 4, padding: 1, pool: 2}
+    - {out: 16, kernel: 3, stride: 1, padding: 1}
+    - {out: 16, kernel: 5, padding: 2, pool: 2}
+    - {out: 128, kernel: 5, padding: 0, pool: 2}
+    - {out: classes, kernel: 1}

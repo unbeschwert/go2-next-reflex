@@ -60,7 +60,8 @@ def export_deployment(qat_model, formats: Formats, cfg: Config, run_dir: Path, m
     server = {
         "application": {"host": "0.0.0.0", "port": 3333, "weights_file": "/root/weights.txt", "max_concurrency": 40},
         "inputs": {"channels": 2, "height": size, "width": size, "scaling": float(2 ** formats.potential_frac)},
-        "outputs": {"channels": n, "height": 1, "width": 1},
+        # A classes x H x W output map: the reader sums each class over the H x W positions.
+        "outputs": {"channels": n, "height": layer_shapes(cfg)[-1].out_h, "width": layer_shapes(cfg)[-1].out_w},
     }
     (out / "spleat-server-config.yaml").write_text(yaml.safe_dump(server, sort_keys=False))
     camera = {"frequency": cfg.data.frequency_hz, "downsampling": cfg.data.downsampling,

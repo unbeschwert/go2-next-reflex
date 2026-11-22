@@ -169,6 +169,11 @@ class LayerConfig:
     kernel: int
     stride: int = 1
     padding: int = 0
+    # Average pooling between BatchNorm and the neuron (riverops SpikingConvBNAvgPool2d): downsamples by
+    # `pool` with a smoothing filter instead of a strided conv. Folded into the conv for the FPGA, which
+    # sees one conv of kernel `kernel + pool - 1` and stride `pool`. Needs stride 1 (riverops' fusion
+    # is only exact then). 1 = no pooling.
+    pool: int = 1
 
 
 @dataclass

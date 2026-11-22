@@ -101,6 +101,8 @@ All off by default, so older configs train as before. `configs/motion_buddy_40_v
 | `train.loss: ce+mse`, `ce_temperature: 10`, `ce_mse_weight: 1` | Cross-entropy on the spike counts / τ as logits, plus the notebook's MSE to the 80/20 % targets (`mse`, the default; `ce` alone is also possible). Mixup blends the labels like the inputs | Cross-entropy optimizes the ranking that the argmax uses; the MSE keeps the counts in the 20–80 % range (not saturated or silent, as the 8-bit thresholds and potentials are sized for) |
 | `augment.mixup` | Blends two clips and their spike-count targets ([doc/data-augmentation.md](../doc/data-augmentation.md)) | Graded rather than overconfident outputs |
 | v3 layer sizes (in the config) | 16 → 16 → **16** k6 s2 → **128 k6 s2** (2×2 output) → classes k2: 88.6 k weights instead of 175 k | The 2×2 output shares weights across positions, so it's partly position-independent. Our 256 × k9 layer on a 9×9 map is effectively fully connected, and fails on off-centre people. Changes `model.json`, so it needs its own firmware |
+| Spatial head: last layer `{out: classes, kernel: 1}` on the 2×2 map | The output is a classes × H × W map; a class's score is its spike count summed over time **and** positions (always done; for a 1×1 output it's the same as before) | The same classifier weights at every position, so the head is translation-invariant (global sum pooling in software). On the board the reader must add each class's H·W outputs ([doc/architecture-options.md](../doc/architecture-options.md#spatial-head)) |
+| Layer `pool: P` (with `stride: 1`) | Stride-1 conv → BatchNorm → P×P average pool → neuron (riverops `SpikingConvBNAvgPool2d`). Folded for the FPGA into one conv of kernel `kernel + P − 1`, stride `P`. A network with pooling is folded before quantization (no fusion-aware QAT for it) | Anti-aliased downsampling: smoother and more robust to small shifts than a strided conv, at the same FPGA cost. Configs: `configs/arch/` ([doc/architecture-options.md](../doc/architecture-options.md#avg-pool-downsampling)) |
 
 Not known from the v3 notebook (it isn't on GitHub), so these are our assumptions: dropout after layers 1–3, the augmentation probabilities, mixup α = 0.4, cosine over the first 30 of 40 epochs.
 
@@ -168,7 +170,7 @@ Everything lands in `runs/<run>/deploy/`, and `DEPLOY.md` has the exact values f
 |---|---|
 | `model.json` | riversdk.dev → New firmware (board KV260, Prophesee IP GenX320, **the formats from DEPLOY.md**) |
 | `weights.txt` | `/root/weights.txt`: all weights, all biases, threshold/leak per layer; no trailing newline |
-| `spleat-server-config.yaml` | `/root/.config/spleat-server/config.yaml`: input H×W, scaling = 2^potential_frac, outputs = classes |
+| `spleat-server-config.yaml` | `/root/.config/spleat-server/config.yaml`: input H×W, scaling = 2^potential_frac (**check**: the board needs 4096 / downsampling², see [doc/deploy-model.md](../doc/deploy-model.md)), outputs = classes × the last layer's H × W |
 | `metavision_camera.json` | `/root/metavision_camera.json`: frequency = 1e6 / time_window_us, downsampling |
 | `memory_report.md/.json` | BRAM/URAM estimate for the chosen formats |
 | `parameters.json`, `export_summary.json` | integers per layer, clipping statistics |

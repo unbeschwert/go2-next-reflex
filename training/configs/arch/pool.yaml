@@ -1,0 +1,13 @@
+# Anti-aliased downsampling on the 80x80 s4 network: every downsampling layer is a stride-1 conv followed
+# by average pooling (folded into one conv for the FPGA: k5+pool4 → k8 s4, k5+pool2 → k6 s2, the same
+# output sizes as the strided convs). 20-epoch recipe of configs/optim/adam.yaml.
+base: ../optim/adam.yaml
+name: arch_pool
+
+model:
+  layers:                      # 80 → 19 → 19 → 9 → 2 → 1
+    - {out: 16, kernel: 5, padding: 1, pool: 4}
+    - {out: 16, kernel: 3, stride: 1, padding: 1}
+    - {out: 16, kernel: 5, padding: 2, pool: 2}
+    - {out: 128, kernel: 5, padding: 0, pool: 2}
+    - {out: classes, kernel: 2}
