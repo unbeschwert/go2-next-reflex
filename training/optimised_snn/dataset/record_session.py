@@ -26,16 +26,10 @@ import threading
 import time
 from pathlib import Path
 
-import numpy as np
-import matplotlib.pyplot as plt
-
-from river_tools.capture.events import COLORS, EVENT_DTYPE, EVENT_SIZE
-from river_tools.capture.remote import start_camera, stop_camera
-from river_tools.capture.stream import receive_batches
-
 GESTURES = json.loads((Path(__file__).resolve().parent / "gestures.json").read_text())
 CLASSES = {g["id"]: g["name"] for g in GESTURES["classes"]}
 HOW = {g["id"]: g["how"] for g in GESTURES["classes"]}
+CLASS_STYLES = {g["id"]: g["styles"] for g in GESTURES["classes"] if g.get("styles")}
 
 ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--session", required=True)
@@ -54,11 +48,36 @@ ap.add_argument("--no-action", type=int, default=1, help="record no-action as we
 ap.add_argument("--shuffle", type=int, default=1, help="shuffle the gesture order")
 ap.add_argument("--seed", type=int, default=0)
 ap.add_argument("--auto-close", action="store_true", help="close the window when the plan is done")
+ap.add_argument("--person", default="",
+                help="who records: the person's earlier session number (e.g. 21) or a new name. Sessions of "
+                     "the same person must stay in the same train/val/test split")
 a = ap.parse_args()
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+from river_tools.capture.events import COLORS, EVENT_DTYPE, EVENT_SIZE
+from river_tools.capture.remote import start_camera, stop_camera
+from river_tools.capture.stream import receive_batches
 
 session = f"{int(a.session):02d}"
 out_dir = Path(a.captures) / f"s{session}" / "labeled"
 out_dir.mkdir(parents=True, exist_ok=True)
+person_file = out_dir.parent / "person.txt"
+if a.person:
+    person = a.person.strip()
+    if not person:
+        ap.error("--person must have a non-empty value")
+    person = f"{int(person):02d}" if person.isdecimal() else person
+    if person_file.exists():
+        recorded = person_file.read_text().strip()
+        recorded = f"{int(recorded):02d}" if recorded.isdecimal() else recorded
+        if person != recorded:
+            ap.error(f"session {session} already belongs to person {recorded!r}")
+    else:
+        person_file.write_text(person + "\n")
+elif not person_file.exists():
+    print(f"note: no --person given; session {session} counts as a new person in the split")
 
 rng = random.Random(a.seed or int(session))
 plan = []
@@ -76,11 +95,18 @@ for c in order:
     if c == 5:
         segs = [(st, float(w)) for st, w in (x.split(":") for x in a.no_action_styles.split(",") if x)]
     else:
-        segs = [(st, 1.0) for st in a.styles.split(",") if st]
+        own = CLASS_STYLES.get(c)                   # per-class plan from gestures.json (e.g. front/back)
+        use = own if (own and a.styles == ap.get_default("styles")) else a.styles.split(",")
+        segs = [(st, 1.0) for st in use if st]
     wsum = sum(w for _, w in segs)
     for i, (st, w) in enumerate(segs):
-        plan.append((c, st, total_s * w / wsum, a.ready if i == 0 else a.switch))
-HINT_STYLE = {"still": "stand still, small fidgets", "empty": "step OUT of the view"}
+        turning = i > 0 and st.startswith("back") and not segs[i - 1][0].startswith("back")
+        plan.append((c, st, total_s * w / wsum, a.ready if (i == 0 or turning) else a.switch))
+HINT_STYLE = {"still": "stand still, small fidgets", "empty": "step OUT of the view",
+              "front": "FACE THE CAMERA and walk on the spot, normal pace",
+              "frontfast": "FACE THE CAMERA and walk on the spot FAST",
+              "back": "TURN AROUND: back to the camera, walk on the spot, normal pace",
+              "backfast": "back to the camera, walk on the spot FAST"}
 
 
 class TakeWriter:
