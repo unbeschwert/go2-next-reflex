@@ -67,3 +67,7 @@ Recording tips:
 - Keep one folder per person, so you can test on people the model hasn't seen.
 - Vary speed and size the way the dataset does (`normal` / `fast` / `large`).
 - Record a "no action" class of people moving without doing a gesture.
+
+Our cued recorder does the cutting and naming for you: it shows which gesture to do, labels each take
+from the cue and cuts it into 1 s clips with quality filters. See
+[`training/optimised_snn/dataset/README.md`](../training/optimised_snn/dataset/README.md).

@@ -28,6 +28,8 @@ ap.add_argument("--raw", action="store_true", help="also write a zip with the ra
 ap.add_argument("--time-split", default="",
                 help="e.g. 70,15,15: split every take in time into train/val/test (for few people); "
                      "val/test go to sessions 1SS/2SS (e.g. 120/220 for session 20), 1 clip gap at each boundary")
+ap.add_argument("--val", default="", help="validation sessions (comma list); default: the third-last session")
+ap.add_argument("--test", default="", help="test sessions (comma list); default: the last two sessions")
 a = ap.parse_args()
 
 gest = json.loads((HERE / "gestures.json").read_text())
@@ -90,10 +92,27 @@ if a.time_split:
     tag_split = True
 else:
     tag_split = False
-    if len(sessions) >= 3:          # suggested person split, recorded in labels.csv (files stay in place)
+    # who recorded each session: ~/river-captures/sNN/person.txt (record_session.py --person); default itself
+    person = {}
+    for s in sessions:
+        f = Path(a.captures) / f"s{s}" / "person.txt"
+        p = f.read_text().strip() if f.exists() else s
+        person[s] = f"{int(p):02d}" if p.isdigit() else p
+    VAL = [f"{int(s):02d}" for s in a.val.split(",") if s] or sessions[-3:-2]
+    TEST = [f"{int(s):02d}" for s in a.test.split(",") if s] or sessions[-2:]
+    if len(sessions) >= 3 or a.val or a.test:   # person split, recorded in labels.csv (files stay in place)
+        split_of = {s: ("val" if s in VAL else "test" if s in TEST else "train") for s in sessions}
+        clash = {}
+        for s, p in person.items():
+            clash.setdefault(p, set()).add(split_of[s])
+        clash = {p: v for p, v in clash.items() if len(v) > 1}
+        if clash:
+            raise SystemExit(f"person(s) in more than one split: {clash} - one person's sessions must stay "
+                             f"together; choose --val/--test accordingly (person per session: {person})")
         for r in rows:
-            r["split"] = ("val" if r["session"] == sessions[-3] else
-                          "test" if r["session"] in sessions[-2:] else "train")
+            r["split"] = split_of[r["session"]]
+        for r in rows:
+            r["person"] = person[r["session"]]
 if bad:
     raise SystemExit(f"invalid/unknown files, fix first: {bad[:10]}")
 if not rows:
@@ -139,21 +158,32 @@ Validation/test clips are stored as extra session folders so the session-based t
 This measures how well the model works **for the recorded person(s)**, not for new people.
 """
 elif len(sessions) >= 3:
-    val_s, test_s = sessions[-3], sessions[-2:]
+    val_s, test_s = VAL, TEST
+    have = {r["class_id"] for r in rows}
+    same = {p: [s for s in sessions if person[s] == p] for p in set(person.values())}
+    same = {p: v for p, v in same.items() if len(v) > 1}
+    person_note = ("Some people recorded more than one session (kept in the same split): "
+                   + "; ".join(f"person {p} = sessions {', '.join(v)}" for p, v in sorted(same.items())) + ".\n"
+                   if same else "")
+    names = ",".join(g["name"].replace("-360", "").replace("-", " ").capitalize() for g in classes.values())
+    unused = [str(cid - 1) for cid in classes if cid not in have]
+    unused_arg = f" --unused {','.join(unused)}" if unused else ""
+    unused_note = (f"`--unused {','.join(unused)}` keeps the output(s) without clips in this export silent, "
+                   if unused else "")
     split_note = f"""
 ## Train / validation / test split (by person)
 
-Split by **session = person**, so the scores show how the model does on people it has never seen.
-Suggested split (used for our board model): validation = session {val_s}, test = sessions {', '.join(test_s)},
-training = all others ({', '.join(s for s in sessions if s != val_s and s not in test_s)}).
-
+Split by **person**, so the scores show how the model does on people it has never seen.
+Suggested split: validation = sessions {', '.join(val_s)}, test = sessions {', '.join(test_s)},
+training = all others ({', '.join(s for s in sessions if s not in val_s and s not in test_s)}).
+{person_note}
 ```
-python train_snn_v8.py --zip {out.name} --arch nb40 --val {val_s} --test {','.join(test_s)} \\
-  --class-names "Heart,Turn left,Turn right,Namaskaram,No action" --unused 3 --mirror 1:2 --qat-bits 8h
+python train_snn_v8.py --zip {out.name} --arch nb40 --val {','.join(val_s)} --test {','.join(test_s)} \\
+  --class-names "{names}"{unused_arg} --mirror 1:2 --qat-bits 8h
 ```
 
-`--unused 3` keeps the dropped namaskaram output silent, `--mirror 1:2` makes the left/right flip
-augmentation swap the two turn labels, `--qat-bits 8h` exports weights for the 8-bit board firmware.
+{unused_note}`--mirror 1:2` makes the left/right flip augmentation swap the two turn labels,
+`--qat-bits 8h` exports weights for the 8-bit board firmware.
 """
 
 readme = f"""# Go2 gesture dataset ({', '.join('session ' + s for s in sessions)})
@@ -225,7 +255,7 @@ t = ev["timestamp"] - ev["timestamp"][0]      # us since clip start, 0 .. ~1e6
 3. **Do not mix with the Motion Buddy zip as-is**: its classes 01-04 are sit/lay-down/hello/dance and
    would collide with our 01-04. Its clips can be added as no-action (rename to `gesture_05-...`).
 4. Activity differs a lot between classes: heart ~10-20k events per clip, the turns ~40-100k,
-   no-action ~15-70k. namaskaram was dropped because it was too faint (~6k).
+   no-action ~15-70k.
 5. The deployed board model takes 40x40 input (downsampling 8) and 5 outputs; output 4 = no action.
 """
 
