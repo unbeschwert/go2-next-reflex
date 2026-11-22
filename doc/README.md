@@ -8,6 +8,7 @@ Most of this is condensed from the organisers' RIVER SDK docs at https://riversd
 
 | File | What's in it |
 |---|---|
+| [Gesture-controlled_Go2_what_we_fixed_and_how_it_works_now.pdf](Gesture-controlled_Go2_what_we_fixed_and_how_it_works_now.pdf) | **Overview (PDF, 6 pages)**: what went wrong in the original process and how we fixed it, the system architecture, how the model was improved, cued recording with spikes, results |
 | [kria-setup.md](kria-setup.md) | Board setup: cables, SSH/UART, network to the Go2, starting the SPLEAT server and camera app |
 | [capture-data.md](capture-data.md) | Recording your own event clips with `river-tools` |
 | [motion-buddy-dataset.md](motion-buddy-dataset.md) | The supplied gesture dataset: file format, classes, statistics, viewing clips |
