@@ -33,7 +33,7 @@ def input_shape(ticks_per_step, grid=GRID):
     return (CLIP_TICKS // ticks_per_step, 2, grid, grid)
 
 
-def bin_events(events, timestamps, ticks_per_step=TICKS_PER_STEP, *, grid=GRID):
+def bin_events(events, timestamps, ticks_per_step=TICKS_PER_STEP, *, grid=GRID, max_count=MAX_COUNT):
     shape = input_shape(ticks_per_step, grid)
     limit = np.searchsorted(timestamps, int(timestamps[0]) + CLIP_TICKS)
     steps = ((timestamps[:limit] - timestamps[0]) // ticks_per_step).astype(np.int64)
@@ -41,7 +41,7 @@ def bin_events(events, timestamps, ticks_per_step=TICKS_PER_STEP, *, grid=GRID):
     factor = SIZE // grid
     flat_index = ((steps * 2 + events["p"]) * grid + events["y"] // factor) * grid + events["x"] // factor
     counts = np.bincount(flat_index, minlength=int(np.prod(shape))).reshape(shape)
-    return np.minimum(counts, MAX_COUNT)
+    return counts if max_count is None else np.minimum(counts, max_count)
 
 
 def write_cache(output, *, ticks_per_step=TICKS_PER_STEP, **arrays):

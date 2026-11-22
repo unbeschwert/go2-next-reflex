@@ -194,13 +194,17 @@ The [software experiment](../models/left-palm-40-q26-comparison.json) compared Q
 | Q2.6 conversion after training | 62/76 (81.6%) | 14.0 px | 35.4 px |
 | Q2.6 with quantization-aware training | 63/76 (82.9%) | 16.1 px | 40.1 px |
 
-### Kria test plan
+## RiverSDK left-palm model
 
-The existing 40×40 gesture bitstream uses signed Q2.6 weights and biases, Q4.12 membrane potentials, hard reset on spikes, and five binary spike outputs. The exported palm model shares its parameter encoding. Its software membrane simulation, subtractive reset, time pooling, and linear coordinate readout require a native model and matching firmware before FPGA replay.
+Upload [the native `model.json`](../models/left-palm-40-riversdk/model.json) to RiverSDK with **KV260**, **GenX320**, **Q2.6 weights**, and **Q4.12 potentials**. It matches the five-layer 40×40 `nb40` graph used by job 28 byte for byte. A bitstream built from that graph with matching options can load [the palm `weights.txt`](../models/left-palm-40-riversdk/weights.txt). The text file contains 175,191 integers in SPLEAT order. The JSON containing `int8_base64` is the laptop bridge bundle. [The reference graph on `main`](https://github.com/unbeschwert/go2-next-reflex/blob/44df278296d69742829d6181d6bebda778498435/models/optimised_snn/nb40_model.json)
 
-1. Define a spiking coordinate readout and confirm the exact layer graph and input and output shapes against the target bitstream. A graph change requires a matching RiverSDK firmware build.
-2. Train with the target Q2.6 and Q4.12 formats, spike reset behavior, and continuous state between frames. Match the camera bin duration, polarity order, and event scaling used for board replay.
-3. Generate the native RiverOps architecture JSON and `weights.txt` for that build. Confirm that the firmware configuration and bridge decoder agree on the output shape and encoding.
-4. Replay held-out clips through the matching build and report the fraction of forecasts within 30 camera pixels alongside the effective forecast latency.
+The native network takes one `2 × 40 × 40` OFF/ON count frame every 10 ms and uses signed Q2.6 weights and biases, Q4.12 membrane potentials, and hard reset on a spike. Training divides the event count per 8×8 block by 64, matching the `nb40` camera setup with `inputs.scaling: 64`. The network emits five binary spike outputs ordered `X+`, `X-`, `Y+`, `Y-`, and unused. The coordinate bridge averages spikes over ten consecutive steps and converts the rate differences to pixels. It emits one forecast per 50 ms targeting the next 50 ms window.
 
-The RiverOps SDK and live board were unavailable for this pilot. The board test is pending a native palm readout and a matching build.
+```sh
+python -m training.train_left_palm_riversdk --output models/left-palm-40-riversdk
+python -m training.left_palm_bridge --riversdk-spikes --ros-topic /left_palm/forecast
+```
+
+For the second command, pipe in the SPLEAT spikes with their corresponding input-bin timestamps as JSON lines. Each record contains `window_start_us` and an array `spikes` of five binary values. The coordinate bridge publishes the same message fields as the laptop path. The gesture bridge interprets those channels as motion commands and requires the gesture weights.
+
+The native file passed a round trip with `main`'s `weights_convert.py`. The training simulator and `main`'s integer SPLEAT simulator produced identical spikes on 840 steps of replay with the exported weights. Across the two held-out folds, 33/76 native-model forecasts landed within 30 px (43.4%) and median error was 32.9 px. Live FPGA and ROS 2 tests remain pending. [Native evaluation results](../models/left-palm-40-riversdk/metrics.json)
