@@ -228,7 +228,7 @@ class QuantConfig:
     weight_int_bits: int | str = "auto"  # "auto": smallest that holds the BN-folded weights
     weight_percentile: float = 99.9    # "auto" sizes for this percentile of |weight| (and max |bias|)
     potential_bits: int = 16
-    potential_int_bits: int = 4        # Q4.12 → spleat-server scaling 4096
+    potential_int_bits: int = 4        # Q4.12 → spleat-server scaling 4096 / downsampling² ("mean" frames)
     qat_epochs: int = 10
     qat_lr: float = 0.0001
     # One weight format for all layers (the firmware takes one), but each layer has its own threshold in

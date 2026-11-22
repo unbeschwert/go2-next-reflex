@@ -27,6 +27,22 @@ CAMERA_BIASES = {"bias_diff": 51, "bias_diff_off": 40, "bias_diff_on": 40, "bias
                  "bias_refr": 82}
 
 
+def input_scaling(cfg: Config, formats: Formats) -> float:
+    """spleat-server `inputs.scaling`: the factor that turns a despot frame value into the network's
+    input in potential-format integers. despot sends the *sum* of the events in each downsampling block
+    (measured on the board, doc/deploy-model.md), so for "mean" training frames (sum / block area) the
+    factor is 2^potential_frac / downsampling²: 64 for 40x40, 256 for 80x80 with Q4.12. "sum" frames
+    are what despot sends, so 2^potential_frac. "binary" frames (0/1) can't be produced by a factor:
+    2^potential_frac is written and a warning printed."""
+    one = float(2 ** formats.potential_frac)
+    if cfg.data.encoding == "mean":
+        return one / cfg.data.downsampling ** 2
+    if cfg.data.encoding == "binary":
+        print("warning: data.encoding 'binary' doesn't match despot's block sums; no inputs.scaling fixes "
+              "that, so the board will see different inputs than training", flush=True)
+    return one
+
+
 def export_deployment(qat_model, formats: Formats, cfg: Config, run_dir: Path, metrics: dict | None = None) -> dict:
     out = run_dir / "deploy"
     out.mkdir(parents=True, exist_ok=True)
@@ -59,7 +75,7 @@ def export_deployment(qat_model, formats: Formats, cfg: Config, run_dir: Path, m
     # Kria-side configuration, derived from the same config as training.
     server = {
         "application": {"host": "0.0.0.0", "port": 3333, "weights_file": "/root/weights.txt", "max_concurrency": 40},
-        "inputs": {"channels": 2, "height": size, "width": size, "scaling": float(2 ** formats.potential_frac)},
+        "inputs": {"channels": 2, "height": size, "width": size, "scaling": input_scaling(cfg, formats)},
         # A classes x H x W output map: the reader sums each class over the H x W positions.
         "outputs": {"channels": n, "height": layer_shapes(cfg)[-1].out_h, "width": layer_shapes(cfg)[-1].out_w},
     }
@@ -147,10 +163,12 @@ despot_test_camera                                             # once after each
 despot_send_and_forget --to_display 0
 ```
 
-The server sends {cfg.n_classes} float32 scores per frame on TCP port 3333. The ROS side
-(`go2-kria`) must be changed to expect {cfg.n_classes} scores (see doc/go2-kria-overview.md).
+The server sends {cfg.n_classes} × {layer_shapes(cfg)[-1].out_h} × {layer_shapes(cfg)[-1].out_w} float32 values per frame on TCP port 3333
+(classes × output height × width). With more than one position, add each class's values to get its score.
+The ROS side (`go2-kria`) must be changed to expect {cfg.n_classes} scores (see doc/go2-kria-overview.md).
 
 Input frames: {cfg.data.size}x{cfg.data.size}, {cfg.data.time_window_us / 1000:g} ms per frame
 (despot downsampling {cfg.data.downsampling}, frequency {cfg.data.frequency_hz:g} Hz), training encoding
-`{cfg.data.encoding}`. Check that despot's frames use the same encoding (training/README.md).
+`{cfg.data.encoding}`. despot sends block sums, so `inputs.scaling` in spleat-server-config.yaml is
+{input_scaling(cfg, f):g} (= 2^{f.potential_frac}{" / " + str(cfg.data.downsampling) + "²" if cfg.data.encoding == "mean" else ""}).
 """

@@ -148,7 +148,7 @@ The pipeline therefore uses:
   | per-layer sized for weights only (biases clipped) + QAT | 55.6 | 36.8 |
 
   Per-layer formats without fine-tuning lose only ~1–2 points, and QAT on top doesn't help. **Biases must fit**: clipping them broke the model, and QAT hid it (train 93 %, val 50 %, because fused-BN QAT rebuilds the bias around batch statistics in training mode). An earlier test that scaled only layer 0 but kept the format chosen with layer 0 included showed no gain; that test was flawed. **Still to confirm on the board** that SPLEAT uses the per-layer thresholds from `weights.txt`: `scripts/fpga_debug/threshold_fpga_check.py`.
-- **16-bit Q4.12 potentials.** Each neuron's potential is stored between time steps, in 18-bit BRAM words. Q4.12 gives the spleat-server `scaling: 4096`.
+- **16-bit Q4.12 potentials.** Each neuron's potential is stored between time steps, in 18-bit BRAM words. Q4.12 gives the spleat-server `scaling` 4096 for one input unit, divided by downsampling² because despot sends block sums and training uses means.
 
 ### `fpga.py` estimate
 
@@ -170,7 +170,7 @@ Everything lands in `runs/<run>/deploy/`, and `DEPLOY.md` has the exact values f
 |---|---|
 | `model.json` | riversdk.dev → New firmware (board KV260, Prophesee IP GenX320, **the formats from DEPLOY.md**) |
 | `weights.txt` | `/root/weights.txt`: all weights, all biases, threshold/leak per layer; no trailing newline |
-| `spleat-server-config.yaml` | `/root/.config/spleat-server/config.yaml`: input H×W, scaling = 2^potential_frac (**check**: the board needs 4096 / downsampling², see [doc/deploy-model.md](../doc/deploy-model.md)), outputs = classes × the last layer's H × W |
+| `spleat-server-config.yaml` | `/root/.config/spleat-server/config.yaml`: input H×W, scaling = 2^potential_frac / downsampling² for "mean" frames (despot sends block sums: 64 at 40×40, 256 at 80×80 with Q4.12; see [doc/deploy-model.md](../doc/deploy-model.md)), outputs = classes × the last layer's H × W |
 | `metavision_camera.json` | `/root/metavision_camera.json`: frequency = 1e6 / time_window_us, downsampling |
 | `memory_report.md/.json` | BRAM/URAM estimate for the chosen formats |
 | `parameters.json`, `export_summary.json` | integers per layer, clipping statistics |
