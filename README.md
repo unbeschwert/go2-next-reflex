@@ -108,7 +108,7 @@ cd dashboard && ./run.sh               # http://127.0.0.1:8800
 |---|---|
 | Bhanuteja Vadlamudi | [linkedin.com/in/bhanuteja-vadlamudi-25291a135](https://www.linkedin.com/in/bhanuteja-vadlamudi-25291a135/) |
 | Cherian Grundmann | [linkedin.com/in/cherian-grundmann](https://www.linkedin.com/in/cherian-grundmann) |
-| Grigorii Vydrevich | |
+| Grigorii Vydrevich | [linkedin.com/in/grigorii-vydrevich](https://www.linkedin.com/in/grigorii-vydrevich) |
 | Ritayan Dhara | [linkedin.com/in/ritayandhara](https://www.linkedin.com/in/ritayandhara) |
 | Nirmal Kumar Ramadoss | [linkedin.com/in/nirmal-kumar-ramadoss-b9367a25a](https://www.linkedin.com/in/nirmal-kumar-ramadoss-b9367a25a/) |
 | Litim Jihen | [linkedin.com/in/litim-jihen-a10ba7239](https://www.linkedin.com/in/litim-jihen-a10ba7239) |
