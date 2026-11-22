@@ -1,0 +1,7 @@
+# AdamW 1e-1: about Adam 1e-4's strength on layer 3, stronger on layers 0-1.
+base: base_e20.yaml
+name: optim_adamw_1e-1
+
+train:
+  optimizer: adamw
+  weight_decay: 0.1

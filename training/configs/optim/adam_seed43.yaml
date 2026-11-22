@@ -1,0 +1,8 @@
+# Same as adam.yaml with another seed: how far two identical runs differ (the noise level).
+base: base_e20.yaml
+name: optim_adam_seed43
+
+seed: 43
+train:
+  optimizer: adam
+  weight_decay: 0.0001

@@ -5,4 +5,5 @@ name: motion_buddy_80_v3_s4_adamw
 
 train:
   optimizer: adamw
+  decay_on: conv_weights       # as run #21
   weight_decay: 0.01

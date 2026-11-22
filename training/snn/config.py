@@ -193,11 +193,13 @@ class TrainConfig:
     # Weight averaging: the final float model is the average of the last N epochs' weights instead of
     # the single epoch with the best validation accuracy (0 = best epoch, as before).
     average_last: int = 0
-    # adam: weight decay added to the gradient (as the reference notebook), every parameter.
-    # adamw: decoupled decay, conv weights only (not BatchNorm, biases or the learnable leak).
+    # adam: weight decay added to the gradient (L2, as the reference notebook). adamw: decoupled decay.
     # Not equivalent strengths: Adam's 1e-4 is divided by the (small) gradient, so it matched AdamW 1e-2
     # in layers 0-1 but was ~15x stronger in layer 3 (doc/training-log.md, run #21).
     optimizer: str = "adam"
+    # Which parameters get weight_decay, for either optimizer: all (as the notebook) | conv_weights
+    # (not BatchNorm γ/β or the learnable leaks).
+    decay_on: str = "all"
     # mse: spike counts to target_high/target_low * T (the notebook). ce: cross-entropy on counts /
     # ce_temperature. ce+mse: both, MSE weighted by ce_mse_weight (keeps the counts in the 20-80 % range).
     loss: str = "mse"
@@ -348,6 +350,8 @@ def validate(cfg: Config) -> None:
         raise ConfigError("train.ce_temperature must be > 0 and train.ce_mse_weight >= 0")
     if t.optimizer not in ("adam", "adamw"):
         raise ConfigError(f"train.optimizer must be 'adam' or 'adamw', got {t.optimizer!r}")
+    if t.decay_on not in ("all", "conv_weights"):
+        raise ConfigError(f"train.decay_on must be 'all' or 'conv_weights', got {t.decay_on!r}")
     if t.average_last < 0 or t.average_last > t.epochs:
         raise ConfigError("train.average_last must be 0..train.epochs")
     if t.lr_min is not None and not 0 < t.lr_min <= t.lr:

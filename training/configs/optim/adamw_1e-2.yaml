@@ -1,0 +1,7 @@
+# AdamW 1e-2: matches Adam 1e-4 on layers 0-1, ~15x weaker on layer 3 (measured, run #21).
+base: base_e20.yaml
+name: optim_adamw_1e-2
+
+train:
+  optimizer: adamw
+  weight_decay: 0.01

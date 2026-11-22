@@ -1,0 +1,9 @@
+# Optimizer comparison on the 80x80 s4 network, 20 epochs (cosine over 15, average of the last 5).
+# Every run decays only the conv weights, so the optimizer and its decay strength are the only differences.
+base: ../motion_buddy_80_v3_s4.yaml
+name: optim_base_e20
+
+train:
+  epochs: 20
+  average_last: 5
+  decay_on: conv_weights

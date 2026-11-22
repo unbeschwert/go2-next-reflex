@@ -174,17 +174,30 @@ def lr_schedule(cfg: Config):
     return lambda epoch: t.lr_min + (t.lr - t.lr_min) * 0.5 * (1 + math.cos(math.pi * min(epoch - 1, n) / n))
 
 
-def make_optimizer(model, lr: float, cfg: Config):
-    """train.optimizer 'adam': L2 decay on every parameter. 'adamw': decoupled decay on the conv
-    weights only (parameters with more than one dimension); BatchNorm, biases and leaks are not decayed."""
+def decay_groups(model, cfg: Config) -> list[dict]:
+    """Parameter groups for weight decay. train.decay_on 'all': every parameter gets train.weight_decay.
+    'conv_weights': only the convolution weights; BatchNorm γ/β and the learnable leaks get none."""
     t = cfg.train
-    if t.optimizer == "adam":
-        return torch.optim.Adam(model.parameters(), lr=lr, weight_decay=t.weight_decay)
     params = [p for p in model.parameters() if p.requires_grad]
-    decay = [p for p in params if p.ndim > 1]
-    rest = [p for p in params if p.ndim <= 1]
-    return torch.optim.AdamW([{"params": decay, "weight_decay": t.weight_decay},
-                              {"params": rest, "weight_decay": 0.0}], lr=lr)
+    if t.decay_on == "all":
+        return [{"params": params, "weight_decay": t.weight_decay}]
+    conv = {id(m.weight) for m in model.modules() if isinstance(m, (Conv2d, nn.Conv2d))}
+    return [{"params": [p for p in params if id(p) in conv], "weight_decay": t.weight_decay},
+            {"params": [p for p in params if id(p) not in conv], "weight_decay": 0.0}]
+
+
+def make_optimizer(model, lr: float, cfg: Config):
+    """train.optimizer 'adam': torch Adam, decay added to the gradient (L2, rescaled by Adam's per-weight
+    normalization). 'adamw': torch AdamW, decoupled decay (w ← w·(1 − lr·wd), independent of the gradient).
+    Which parameters are decayed is train.decay_on, the same for both, so the optimizer is the only difference."""
+    cls = {"adam": torch.optim.Adam, "adamw": torch.optim.AdamW}[cfg.train.optimizer]
+    return cls(decay_groups(model, cfg), lr=lr)
+
+
+def describe_optimizer(optimizer) -> str:
+    groups = ", ".join(f"{sum(p.numel() for p in g['params']):,} values at decay {g['weight_decay']:g}"
+                       for g in optimizer.param_groups)
+    return f"optimizer: {type(optimizer).__name__} ({groups})"
 
 
 def fit(model, train: SplitData, val: SplitData, cfg: Config, *, epochs: int, lr: float, phase: str,
@@ -193,6 +206,7 @@ def fit(model, train: SplitData, val: SplitData, cfg: Config, *, epochs: int, lr
     """Train; return the model with the best validation accuracy, or with average_last > 0 the average
     of the weights of the last average_last epochs (no selection on validation)."""
     optimizer = make_optimizer(model, lr, cfg)
+    print(f"[{phase}] {describe_optimizer(optimizer)}", flush=True)
     best_acc, best_state = -1.0, copy.deepcopy(model.state_dict())
     average, averaged = None, 0
     for epoch in range(1, epochs + 1):

@@ -1,0 +1,7 @@
+# Adam, L2 decay 1e-4 (the recipe's strength).
+base: base_e20.yaml
+name: optim_adam
+
+train:
+  optimizer: adam
+  weight_decay: 0.0001
