@@ -1,9 +1,15 @@
-"""Deployable weight files on the laptop: where they are, which network they fit, how they scored."""
+"""Deployable weight files on the laptop: where they are, which network they fit, how they scored.
+
+Two kinds: weights files of the team's train_snn_v8/v9 networks under models/ (recognised by their value
+count, ARCHS below; they replace only /root/weights.txt), and runs of our training pipeline under runs/
+(snnruns.py: network, formats and firmware come from the run's own files; they install a full board setup)."""
 from __future__ import annotations
 
 import hashlib
 import json
 from pathlib import Path
+
+from . import snnruns
 
 # input size, layers (in, out, kernel, stride, padding): same table as training/train_snn_v9.py
 ARCHS = {
@@ -68,8 +74,18 @@ def _metrics(run_dir: Path, bits: str, name: str = "metrics.json") -> tuple[dict
             "trig_correct": (r.get("trig") or {}).get("correct"), "trig_false": (r.get("trig") or {}).get("false")}, classes
 
 
-def scan(models_dir: Path) -> list[dict]:
-    """All weights files under models/ (board_ready/, fetched/<run>/, r*/<run>/)."""
+# weight format of the team's weights files: "8h" = the 8-bit firmware (/64), "16" = firmware (3) (/4096)
+LEGACY_FORMATS = {"8h": "Q2.6", "16": "Q4.12"}
+
+
+def scan(models_dir: Path, runs_dir: Path | None = None) -> list[dict]:
+    """All weights files under models/ (board_ready/, fetched/<run>/, r*/<run>/), then the runs under runs/."""
+    out = _scan_models(models_dir)
+    out += snnruns.scan(runs_dir)
+    return out
+
+
+def _scan_models(models_dir: Path) -> list[dict]:
     out = []
     seen = set()
     patterns = ["board_ready/*.txt", "optimised_snn/*/weights_*.txt",          # named, deployable files
@@ -96,13 +112,27 @@ def scan(models_dir: Path) -> list[dict]:
             out.append({"id": hashlib.sha1(str(rel).encode()).hexdigest()[:12],
                         "name": (f"{p.parent.name}/{p.stem}" if rel.parts[0] == "optimised_snn" else p.stem) if named
                         else f"{p.parent.name}/{p.stem}", "path": str(rel), "source": rel.parts[0], "classes": classes,
-                        "metrics": metrics, "bits": bits, **info})
+                        "metrics": metrics, "bits": bits, "kind": "weights",
+                        "formats": {"weights": LEGACY_FORMATS[bits]}, **info})
     return out
 
 
-def find(models_dir: Path, model_id: str) -> dict | None:
-    return next((m for m in scan(models_dir) if m["id"] == model_id), None)
+def find(models_dir: Path, model_id: str, runs_dir: Path | None = None) -> dict | None:
+    return next((m for m in scan(models_dir, runs_dir) if m["id"] == model_id), None)
 
 
-def name_for_md5(models_dir: Path, md5: str) -> str | None:
-    return next((m["name"] for m in scan(models_dir) if m["md5"] == md5), None)
+def by_md5(models_dir: Path, md5: str, runs_dir: Path | None = None) -> dict | None:
+    """The model whose weights.txt has this md5 (runs first: their entry knows the network)."""
+    ms = scan(models_dir, runs_dir)
+    return next((m for m in ms if m["md5"] == md5 and m["kind"] == "setup"), None) or \
+        next((m for m in ms if m["md5"] == md5), None)
+
+
+def name_for_md5(models_dir: Path, md5: str, runs_dir: Path | None = None) -> str | None:
+    m = by_md5(models_dir, md5, runs_dir)
+    return m["name"] if m else None
+
+
+def public(m: dict) -> dict:
+    """A model entry for the browser: no local paths of runs."""
+    return snnruns.public(m) if m.get("kind") == "setup" else m

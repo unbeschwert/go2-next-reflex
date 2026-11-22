@@ -56,13 +56,14 @@ GET `/overview` →
 
 | Method, path | Body | Answer |
 |---|---|---|
-| GET `/board/status` | | overview `board` object + `{time, ros_domain, input_size, scaling, weights_md5}` |
+| GET `/board/status` | | overview `board` object (with `firmware: {md5, known, label, weights, potentials}`: the running bitstream, named when it is a firmware folder below runs/) + `{time, ros_domain, input_size, scaling, weights_md5}` |
 | POST `/board/lock` | `{action: "acquire" \| "release" \| "takeover", purpose}` (takeover: confirm) | `{lock}` |
 | POST `/board/inference` | `{action: "start" \| "start-headless" \| "robot" \| "robot-dry" \| "stop"}` (robot: confirm) | task |
 | GET `/board/logs?name=bridge\|obstacle\|camera\|server&lines=200` | | `{name, lines: []}` |
-| GET `/board/models` | | `{models: [{id, name, path, md5, arch, input, classes, source, metrics: {val, test, synops} \| null, deployed}]}` |
-| POST `/board/deploy` | `{model_id, classes: "own" \| "dataset"}` (confirm) | task |
-| POST `/board/restore` | `{}` (confirm) | task (puts the weights from before the last deploy back) |
+| GET `/board/models` | | `{models: [...]}`: weights files `{id, name, path, md5, arch, input, classes, source, kind: "weights", formats: {weights}, metrics: {val, test, synops} \| null, deployed}` and runs of our pipeline `{id, name, kind: "setup", source: "runs", arch (config name), input, classes, class_names, formats: {weights, potentials, ...}, network: {size, layers, output}, splits, downsampling, server: {input, scaling, outputs}, firmware: {label, job, rel, weights, potentials, bit_md5} \| null, problems: [text], metrics: {val, test, kind}, md5, values, deployed}` (no local paths) |
+| POST `/board/deploy` | `{model_id, classes: "own" \| "dataset"}` (confirm) | task. A run (`kind: "setup"`) installs a full setup: firmware, server config, camera downsampling/frame rate, weights, classes (backup first, rollback if the firmware does not load; 409 if it has `problems`). A weights file replaces weights.txt (409 if the board's firmware is for another network or weight format) |
+| POST `/board/restore` | `{}` (confirm) | task (puts back what the board ran before the last deploy: the weights, or the whole setup) |
+| POST `/board/firmware` | `{model_id}` (confirm) | task: `scripts/firmware_job.py submit --run runs/<name> --download` for a run without firmware (riversdk.dev session needed) |
 | GET `/board/autostart` | | `{installed, enabled, active, conf: {mode, classes, start_delay_s}}` |
 | POST `/board/autostart` | `{action: "install" \| "enable" \| "disable" \| "uninstall", conf?}` (install/enable: confirm) | task |
 
@@ -209,7 +210,7 @@ Record state (also SSE `record`, 4 per second while recording):
 | POST `/dataset/reject` | `{source, path}` (confirm) | `{moved_to}` |
 
 | GET `/dataset/spikes?source=&path=&model=` | | the clip's network spikes, see below (`model` optional: default = the board model for that session's gestures) |
-| GET `/dataset/spike-models` | | `{models: [{id, name, arch, classes, bits}]}` (models the FPGA simulator can replay) |
+| GET `/dataset/spike-models` | | `{models: [{id, name, arch, classes, bits, kind}]}` (models the FPGA simulator can replay: the team's networks and every run of our pipeline) |
 
 Spikes (the clip replayed through the FPGA integer model `spleat_sim.py` (`training/optimised_snn/` or `go2_viz/`), which picks the same gesture as the
 FPGA on 98 % of clips; 60 blank frames first because the FPGA never resets; about 1 s per clip, then cached):
@@ -233,33 +234,33 @@ No machine configured: `GET /train/hosts` → `{hosts: []}`, the other training 
 
 | Method, path | Body | Answer |
 |---|---|---|
-| GET `/train/hosts` | | `{hosts: [{id, label, kind: "slurm" \| "ssh", ok, detail}]}` |
-| GET `/train/options` | | `{datasets: [{id, label}], archs: [...], presets: [{id, label, args}], flags: [{key, type, min, max, default, help}]}` |
-| POST `/train/submit` | `{host, name, dataset, arch, preset, args: {flag: value}, dry_run}` (confirm unless dry_run) | `{job_id, command, dry_run}` |
+| GET `/train/hosts` | | `{hosts: [{id, label, ok, detail}]}` |
+| GET `/train/options` | | `{pipeline: "training.snn", presets: [{id: "training/configs/<file>.yaml", label, name, classes, sessions, data_root, args: {key: value}}], flags: [{key: "train.epochs" ..., type, min, max, choices, default, help}], prepare_datasets: [{id, label}], datasets: [], archs: []}`. Presets are the YAML configs (default recipe first), `args` their values for the form's keys |
+| POST `/train/submit` | `{host, name, preset: <config id>, args: {key: value}, dry_run}` (confirm unless dry_run) | `{job_id, command, dry_run, output}`. Every value that differs from the config becomes `--set key=value`, validated by the pipeline's loader (422 otherwise). Dry run: `training.snn check` on the laptop (its report is in `command`) and a check of the machine |
 | GET `/train/jobs?host=` | | `{jobs: [{id, name, state, time, node, reason}]}` |
 | POST `/train/cancel` | `{host, job_id}` (confirm) | `{ok}` |
 | GET `/train/log?host=&job=&lines=200` | | `{lines: []}` |
-| GET `/train/runs?host=` | | `{runs: [{name, job, arch, dataset, val, test, synops, trig_correct, trig_false, pick, finished}]}` |
-| POST `/train/fetch` | `{host, run}` | task (copies the weights + metrics to the laptop; they then show up in `/board/models`) |
+| GET `/train/runs?host=` | | `{runs: [{name, config, val, test, kind, finished, deployable, classes}]}` (from `runs/*/metrics.json` on the machine; fixed-point accuracy when there is one) |
+| POST `/train/fetch` | `{host, run}` | task (copies `runs/<run>/` to the laptop's runs/; it then shows up in `/board/models`) |
 
 ### Training machines (added in the dashboard)
 
-Any GPU machine reachable with an SSH **key** (no passwords are stored): `kind: "direct"` = a plain GPU machine such as
-a cloud VM (the dashboard starts `train_snn_v9.py` in the background and tracks its process), `kind: "slurm"` = a cluster
-(sbatch). Stored in the private `clusters.toml` (0600). Lists show only `label`, `kind` and reachability.
+A GPU server reachable with an SSH **key** (no passwords are stored); the dashboard starts each run in the background
+there (`setsid nohup`) and tracks its process (`<workdir>/.dd_jobs`). Stored in the private `clusters.toml` (0600).
+Lists show only `label` and reachability.
 
 | Method, path | Body | Answer |
 |---|---|---|
-| GET `/train/hosts` | | `{hosts: [{id, label, kind, ok, detail}]}` (`detail` = "reachable, 290 ms" or a short reason) |
-| GET `/train/machines/{id}` | | `{id, label, kind, host, user, port, identity_file, ssh_host, workdir, slurm_script, python, max_submits_per_hour}` (edit form only) |
+| GET `/train/hosts` | | `{hosts: [{id, label, ok, detail}]}` (`detail` = "reachable, 290 ms" or a short reason) |
+| GET `/train/machines/{id}` | | `{id, label, host, user, port, identity_file, ssh_host, workdir, python, uv, max_submits_per_hour}` (edit form only) |
 | POST `/train/machines` | the same fields (`id` new or existing) | the saved machine (422 names the invalid field) |
 | POST `/train/machines/{id}/delete` | `{}` (confirm) | `{ok}` (removes it from the dashboard only) |
 | GET `/train/keys` | | `{keys: [{ref, name, source: "~/.ssh" \| "dashboard", public}]}`; `ref` goes into `identity_file`; private halves are never sent |
 | POST `/train/keys` | `{name}` | a new ed25519 key `{ref, name, source, public}`: paste `public` into the cloud provider's SSH keys |
 | GET `/train/machines/{id}/server-id` | | `{keys: [{type, fingerprint, trusted}]}` = the server's identity ("SHA256:..."), shown as "Server ID" |
 | POST `/train/machines/{id}/server-id` | `{fingerprint}` | `{trusted}` (409 if the server now shows a different ID) |
-| POST `/train/machines/{id}/test` | `{}` | `{ok, steps: [{name, ok, detail}]}`: SSH login, work folder, GPU, Python + PyTorch, riverops, script + data (+ Slurm) |
-| POST `/train/machines/{id}/prepare` | `{datasets: ["own", "organisers"]}` (confirm) | task: uploads train_snn_v9.py, riverops and the chosen datasets |
+| POST `/train/machines/{id}/test` | `{}` | `{ok, steps: [{name, ok, detail}]}`: SSH login, work folder, GPU, uv, code, PyTorch + riverops, data sessions |
+| POST `/train/machines/{id}/prepare` | `{datasets: ["organisers", "own"]}` (confirm) | task: uv (if missing), the repository code + riverops wheel, `uv sync --group train`, the session folders 01-14 / 20-30 of data/motion_buddy_dataset |
 
 Typical first use: generate key → paste public key at the provider → add machine (host, user, key, folder) → Server ID →
 Trust → Test → Prepare → Dry run → Start.

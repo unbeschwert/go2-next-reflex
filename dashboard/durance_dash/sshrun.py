@@ -131,6 +131,37 @@ class SSH:
             return Result(124, "", "scp timed out", time.monotonic() - t0)
         return Result(p.returncode, out.decode(errors="replace"), err.decode(errors="replace"), time.monotonic() - t0)
 
+    async def rsync(self, src: str, dst: str, download: bool = False, files_from: list[str] | None = None,
+                    extra: list[str] | None = None, timeout: float = 600.0) -> Result:
+        """rsync over the shared SSH connection (incremental: only changed files move). The remote side is a
+        path (no host part). files_from: copy only these paths, relative to src (a folder)."""
+        t0 = time.monotonic()
+        rsh = shlex.join(["ssh", *self.common(), "-p", str(self.port), "-o", "ControlMaster=auto",
+                          "-o", f"ControlPath={self.control_path}", "-o", "ControlPersist=600"])
+        remote = f"{self.dest}:{src if download else dst}"
+        args = ["rsync", "-az", "--partial", "-e", rsh, *(extra or [])]
+        if files_from is not None:
+            args.append("--files-from=-")
+        args += [remote, dst] if download else [src, remote]
+        data = ("\n".join(files_from) + "\n").encode() if files_from is not None else None
+        try:
+            p = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.PIPE if data else asyncio.subprocess.DEVNULL,
+                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        except FileNotFoundError:
+            return Result(127, "", "rsync not installed on this laptop", 0.0)
+        try:
+            out, err = await asyncio.wait_for(p.communicate(data), timeout)
+        except asyncio.TimeoutError:
+            p.kill()
+            await p.wait()
+            return Result(124, "", "rsync timed out", time.monotonic() - t0)
+        except asyncio.CancelledError:
+            if p.returncode is None:
+                p.kill()
+                await asyncio.shield(p.wait())
+            raise
+        return Result(p.returncode, out.decode(errors="replace"), err.decode(errors="replace"), time.monotonic() - t0)
+
 
 async def run_local(args: list[str], timeout: float = 600.0, cwd: str | None = None, env: dict | None = None,
                     log=None) -> Result:

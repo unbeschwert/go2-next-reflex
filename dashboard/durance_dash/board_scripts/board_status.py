@@ -1,5 +1,6 @@
 """Runs ON THE KRIA (sent by the dashboard over SSH, nothing is installed). Prints one JSON object.
-Read-only: processes, mode, model, server config, lock, autostart, bridge settings/status, health.
+Read-only (apart from an md5 cache in /tmp): processes, mode, model, firmware, server config, lock, autostart,
+bridge settings/status, health.
 Python 3.8+, stdlib only (BusyBox userland)."""
 import hashlib
 import json
@@ -75,13 +76,58 @@ if w is not None:
     OUT["model"] = {"md5": hashlib.md5(w).hexdigest(), "values": len(w.split()), "bytes": len(w)}
 OUT["model_classes"] = (read("/root/model_classes") or "dataset").strip() or "dataset"
 
+MD5_CACHE = "/tmp/dd_md5_cache.json"      # path -> [size, mtime_ns, md5]: the bitstream is ~8 MB
+
+
+def md5_cached(path):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    try:
+        with open(MD5_CACHE) as f:
+            cache = json.load(f)
+    except (OSError, ValueError):
+        cache = {}
+    hit = cache.get(path)
+    if hit and hit[0] == st.st_size and hit[1] == st.st_mtime_ns:
+        return hit[2]
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    cache[path] = [st.st_size, st.st_mtime_ns, h.hexdigest()]
+    try:
+        with open(MD5_CACHE, "w") as f:
+            json.dump(cache, f)
+    except OSError:
+        pass
+    return h.hexdigest()
+
+
+FW = "/usr/lib/firmware/xilinx/spleat/"
+OUT["firmware"] = {"bit_md5": md5_cached(FW + "spleat.bit.bin"), "dtbo_md5": md5_cached(FW + "spleat.dtbo")}
+
 cfg = read("/root/.config/spleat-server/config.yaml") or ""
-m_in = re.search(r"inputs:\s*\n(?:\s+.*\n)*?\s+height:\s*(\d+)", cfg)
-m_sc = re.search(r"scaling:\s*([0-9.]+)", cfg)
-m_out = re.search(r"outputs:\s*\n(?:\s+.*\n)*?\s+channels:\s*(\d+)", cfg)
-OUT["server_config"] = {"input": int(m_in.group(1)) if m_in else None,
-                        "scaling": float(m_sc.group(1)) if m_sc else None,
-                        "outputs": int(m_out.group(1)) if m_out else None}
+
+
+def section(name):
+    """key: value pairs of one top-level section of the server config (it is flat YAML)."""
+    m = re.search(r"^%s:\s*\n((?:[ \t]+.*\n?)*)" % name, cfg, re.M)
+    return dict(re.findall(r"^[ \t]+(\w+):\s*([^\s#]+)", m.group(1), re.M)) if m else {}
+
+
+def num(v, kind=int):
+    try:
+        return kind(v)
+    except (TypeError, ValueError):
+        return None
+
+
+ins, outs = section("inputs"), section("outputs")
+OUT["server_config"] = {"input": num(ins.get("height")), "scaling": num(ins.get("scaling"), float),
+                        "outputs": num(outs.get("channels")),
+                        "output_shape": [num(outs.get("channels")), num(outs.get("height", 1)), num(outs.get("width", 1))]}
 cam = read("/root/metavision_camera.json")
 try:
     OUT["camera_config"] = json.loads(cam) if cam else None

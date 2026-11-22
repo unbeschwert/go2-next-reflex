@@ -9,7 +9,7 @@ machines over SSH only.
                                      ├─ SSH ──▶ Kria board 192.168.77.1: status, inference modes, settings file,
                                      │            camera view (SSH tunnel), teleop, model deploy, autostart
                                      │            └─ ROS 2 domain 0 ──▶ Go2 (via the board's USB-Ethernet)
-                                     ├─ SSH ──▶ training machines you add (cloud GPU or Slurm cluster)
+                                     ├─ SSH ──▶ GPU servers you add for training
                                      ├─ local simulator (ROS 2 domain 88, loopback): fake board + real
                                      │    gesture bridge + Go2 animator, RViz in the browser (container)
                                      └─ river-tools: cued recording from the board's camera
@@ -36,7 +36,8 @@ What each part needs on the laptop:
 | Simulator | ROS 2 Jazzy or Humble with the go2-kria workspace (`ros2/env.sh`, see [doc/gesture-pipeline.md](../doc/gesture-pipeline.md)); the dataset zip `own_gestures_s20-30.zip` in `paths.share` |
 | RViz in the browser | Docker usable by your user; the Go2 model downloaded once with `ros2/rviz/fetch_go2_model.sh` |
 | Record | `river-tools` ([doc/capture-data.md](../doc/capture-data.md)); set `paths.recorder_python` to its Python |
-| Training | A GPU machine or Slurm cluster added in Training → Machines; the `riverops` package (`paths.riverops`) |
+| Training | A GPU server reachable over SSH, added in Training → Machines; the riverops wheel in `data/` (`paths.riverops`, never committed); `rsync` |
+| Board → Build firmware | Your riversdk.dev session in `~/.config/riversdk/session` (`scripts/firmware_job.py`, [doc/deploy-model.md](../doc/deploy-model.md)) |
 
 ## Where it finds the project files
 
@@ -47,9 +48,11 @@ Nothing needs configuring in this repository: the dashboard looks up each file b
 | Board software: `live_gesture_bridge.py`, `bridge_settings.py`, `lidar_follow.py`, `inference.sh`, `robot_link.sh` | `kria/` |
 | Go2 animator, `go2.urdf` + meshes, `go2.rviz` | `ros2/rviz/` |
 | ROS environment: `env.sh` (simulator, loopback), `env_board_link.sh` (board test mode, domain 42) | `ros2/` |
-| FPGA integer model `spleat_sim.py`, trainer `train_snn_v9.py` | `training/optimised_snn/` |
+| FPGA integer model `spleat_sim.py` (spike view) | `training/optimised_snn/` |
 | `gestures.json`, `cut_takes.py` (Record page) | `training/optimised_snn/dataset/` |
-| Weights to deploy (`optimised_snn/<classes>/weights_*.txt`, `fetched/<run>/` from training) | `models/` |
+| Training: our pipeline `python -m training.snn` and its YAML configs | `training/snn/`, `training/configs/` (`paths.training_configs`) |
+| Runs of our pipeline (from Training → Fetch or `remote/fetch.sh`), installable as a board setup | `runs/` (`paths.runs`) |
+| The team's weights files (`optimised_snn/<classes>/weights_*.txt`, `board_ready/`), replace only weights.txt | `models/` |
 
 Recordings and datasets stay outside the repository: `paths.data` (clips, default `~/go2-hackathon/data`),
 `paths.share` (dataset zips), `paths.captures` (raw takes, `~/river-captures`), the Durance AI team's
@@ -65,8 +68,8 @@ dataset zip (`paths.organisers_zip`). The older laptop layout (`~/go2-hackathon`
 | Drive | Manual control: dead-man joystick or W/S A/D Q/E keys, speed limit, sport commands (stand, sit, heart, ...), STOP |
 | Record | Guided recording of labelled gesture takes from the board's camera, live preview, cut into 1 s clips |
 | Dataset | Browse every dataset, play a clip next to the network's spikes for it, relabel or reject clips |
-| Training | Machines (add a cloud GPU or cluster), new run (dry run first), jobs, runs table, fetch weights |
-| Board | Inference modes, model deploy with backup/restore, install board software, logs, SD-card mode |
+| Training | Machines (add a GPU server), new run from a YAML config (dry run first), jobs, runs table, fetch runs |
+| Board | Inference modes, install a run (firmware + configs + weights) or deploy weights, build firmware, backup/restore, install board software, logs, SD-card mode |
 | Security | Audit log of every action, password change |
 
 ## Safety
@@ -86,9 +89,11 @@ dataset zip (`paths.organisers_zip`). The older laptop layout (`~/go2-hackathon`
   taking it from someone else needs a confirmation. E-STOP ignores the lock.
 - **Robot mode** always runs with the LiDAR obstacle check (`--require-clear`). Deploying a model never
   re-enters robot mode by itself.
-- **Model deploy**: the new weights must match the firmware's network (value count), the upload is
-  md5-verified, the old weights are backed up on the board (`/root/dashboard_backups/`) and can be restored
-  with one click.
+- **Model deploy** (see [Models](#models)): a run installs only with firmware built for its network and
+  formats, a server config whose input, outputs and scaling fit it, and classes the bridge knows; a weights
+  file must match the firmware's network (value count) and weight format. Uploads are md5-verified, what the
+  board ran before is backed up (`/root/dashboard_backups/`) and Restore puts it back with one click; a setup
+  whose firmware does not load is rolled back at once.
 - The settings file can never make the bridge more trigger-happy than allowed: every value has a range and
   anything invalid falls back to the tuned default (schema: `kria/bridge_settings.py`).
 
@@ -101,7 +106,8 @@ dataset zip (`paths.organisers_zip`). The older laptop layout (`~/go2-hackathon`
   header checks (DNS rebinding), strict Content-Security-Policy, no third-party code at runtime (three.js
   and noVNC are vendored in `static/vendor/`).
 - No arbitrary commands: every remote command is a fixed template and every variable part is validated
-  and shell-quoted. Training flags are whitelisted with types and ranges; job names, run names, clip
+  and shell-quoted. Training configs must be files of `training/configs/`, the form's keys are whitelisted
+  with types and ranges and the result is validated by the pipeline's own loader; job names, run names, clip
   paths and session numbers must match strict patterns (path traversal is refused).
 - SSH: key-based, `BatchMode` (never prompts), strict host keys, one multiplexed connection per host.
   Nothing is installed on the board for status, live view or manual control (helper scripts are sent
@@ -153,27 +159,68 @@ changing them needs no rebuild.
 
 ## Training
 
-The dashboard ships with no training machine. Training → Machines → **Add machine**:
-- **GPU machine** (a cloud VM: the run starts in the background) or **Slurm cluster** (sbatch / squeue / scancel);
+The dashboard ships with no training machine. A training machine is a GPU server reached over SSH (e.g. the
+one in `remote/remote.env`); runs start in the background there and the dashboard tracks their process.
+Training → Machines → **Add machine**:
 - host, user and port, or an alias from `~/.ssh/config`;
 - the login key: one of your standard keys in `~/.ssh`, or **Generate new key** and paste the public key
-  into the cloud provider. Passwords are never stored;
-- the work folder on the machine, its Python, and for Slurm the job script name.
+  into the server's `~/.ssh/authorized_keys`. Passwords are never stored;
+- the work folder on the server (a copy of the repository; the server's existing checkout works), its
+  Python 3 and, if it is not on the PATH or in `~/.local/bin`, its uv.
 
-Then **Server ID**: compare the server's ID with the one your provider shows, and **Trust this server**.
-**Test** shows a checklist (SSH login, work folder, GPU, Python + PyTorch, riverops, training script + data,
-Slurm), **Prepare** copies
-`train_snn_v9.py`, `riverops` and the chosen dataset zips to the work folder.
+Then **Server ID**: compare the server's ID with its real host key, and **Trust this server**.
 
 Machines are stored in the private `clusters.toml` next to the config (mode 0600; the dashboard refuses to
 start when others can read it). The pages show only a machine's name and whether it is reachable; connection
 problems appear as a short reason ("login refused", "connection timed out") and the full text goes to the
 dashboard's own log.
 
-A run: New run → preset, dataset, architecture → **Dry run** (checks the machine and shows the command,
-starts nothing) → Start training → Jobs → Runs table → **Fetch** copies the weights to
-`models/fetched/<run>/` → Board → Deploy. Only `nb40` (40x40, 8-bit firmware) and `best80` (80x80,
-firmware 3) run on the firmwares that exist today; other architectures need a firmware build first.
+Training runs our pipeline (`python -m training.snn`, [training/README.md](../training/README.md)); the
+work folder is a copy of the repository, as `remote/setup.sh` makes it:
+- **Prepare**: installs uv if the machine has none (copied from this laptop), copies the code (git's tracked
+  and untracked-but-not-ignored files) and the riverops wheel, runs `uv sync --group train` and uploads the
+  dataset session folders you choose (`data/motion_buddy_dataset/NN/`; only changed files move).
+- **Test**: SSH login, work folder, GPU, uv, code, PyTorch + riverops, data sessions.
+
+A run: New run → **Config** (a YAML file of `training/configs/`, the default recipe first) → its values for
+the common keys (seed, epochs, learning rate, optimizer, loss, weight averaging, QAT, splits, augmentation
+probabilities) → **Dry run**: `python -m training.snn check` on this laptop (network, FPGA memory) and a
+check of the machine, starts nothing → **Start training**: copies the code again and runs
+`uv run --group train python -m training.snn train --config <yaml> --run-dir runs/<name>-<time> --set ...`,
+one `--set section.key=value` per value you changed (the run's `config.yaml` and `run_info.json` record
+them) → Jobs, log → Runs table (fixed-point val/test accuracy) → **Fetch** copies `runs/<name>/` to this
+laptop's `runs/` → Board → Models → **Build firmware** (if no firmware for its network exists yet) →
+**Install**. Other config keys: edit the YAML file; the form only offers keys it validates.
+
+Older `clusters.toml` files may still have `kind` / `slurm_script`: they are ignored, and a Slurm cluster
+entry is skipped (with a line in the dashboard log).
+
+## Models
+
+Board → Models lists two kinds:
+- **Runs of our pipeline** (`runs/<name>/` with `deploy/`, `config.yaml`, `metrics.json`). Everything comes
+  from the run's own files: the network from `deploy/model.json`, the formats from
+  `deploy/export_summary.json`, the classes and splits from `config.yaml`, the accuracy (fixed point, what
+  the FPGA computes) from `metrics.json`. A new YAML config needs no change in the dashboard. The firmware
+  is any folder below `runs/` with `spleat.bit.bin`, `spleat.dtbo`, the `model.json` it was built from and
+  `job.json` with its formats (`scripts/firmware_job.py` downloads it as `runs/<name>/firmware-job<ID>/`); a
+  run uses one with the same graph and formats, its own first. **Install** writes the firmware, the server
+  config, the camera's downsampling and frame rate (the board's sensor biases and noise filter stay), the
+  weights and the classes (`board/install_setup.sh`, the steps of
+  `firmware_performance_testing/switch_setup.sh`). A run that cannot work on the board is listed with the
+  reason: no firmware yet, a server config from before the input-scaling fix (`scaling` must be
+  4096 / downsampling² for despot's block sums), classes in an order the bridge does not know, or a graph that
+  is not a plain chain of ConvLIF2d layers.
+- **The team's weights files** under `models/`, recognised by their value count (`models.ARCHS`); they
+  replace only `weights.txt` and are refused when the board's firmware is for another network or weight
+  format.
+
+The board status names the running firmware when it is one of the folders below `runs/` (by md5) and warns
+when weights and firmware do not belong together. The Dataset page's spike view runs both kinds through the
+integer model `spleat_sim.py`; for a run, with its layers and the fixed-point shifts of its formats. On 60
+test clips of motion-buddy-80-v4 it gave the same winner as our fixed-point emulator on 57 (the board
+matched the emulator on 19 of 20, [doc/fpga-debugging.md](../doc/fpga-debugging.md)), so it is a view of
+the network's activity, not an exact replay.
 
 ## Container
 
@@ -194,8 +241,10 @@ capabilities and no-new-privileges. It mounts `~/.ssh` read-only, the repository
 settings. Do not run the container and `./run.sh` at the same time: both use port 8800
 (`CONFIG=other.toml docker/run-dashboard.sh start` uses another config and port).
 
-In the container: board, dataset, settings, manual control, E-STOP, training (with `riverops` inside the
-mounted folder, see `docker/config.container.toml`). From the laptop install
+In the container: board, dataset, settings, manual control, E-STOP, training (the riverops wheel inside the
+mounted repository, see `docker/config.container.toml`; a machine without uv must get it from the laptop
+install's Prepare). Board → Build firmware needs `uv` and the riversdk.dev session, so it runs from the
+laptop install. From the laptop install
 (`./run.sh`): the simulator (ROS 2), recording (river-tools) and starting the RViz container. Giving the
 dashboard container the Docker socket would make it root-equivalent on the laptop, so that is not done.
 
@@ -219,10 +268,11 @@ dashboard container the Docker socket would make it root-equivalent on the lapto
 ```
 durance_dash/      backend: app.py (routes), config.py (paths, file lookup), security.py, board.py, live.py,
                    settings_svc.py, robot.py, sim.py, rviz.py, recording.py, dataset.py, spikes.py,
-                   training.py, machines.py, models.py, procs.py, sshrun.py, events.py
+                   training.py (our pipeline on GPU machines), machines.py, models.py (weights catalogue),
+                   snnruns.py (runs of our pipeline, their firmware), procs.py, sshrun.py, events.py
   board_scripts/   run on the board, sent over SSH (status probe, status/log tap, dead-man teleop)
   local_scripts/   laptop helpers (fake board, pose tap, headless recorder)
-board/             SD-card mode files installed on the board
+board/             files for the board: SD-card mode, install_setup.sh (sent over SSH to install a setup)
 docker/            dashboard container, RViz container (docker/rviz/)
 static/            browser UI (vanilla JS modules, vendored three.js and noVNC)
 docs/API.md        HTTP API

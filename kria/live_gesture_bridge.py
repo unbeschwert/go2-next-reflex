@@ -40,7 +40,7 @@ try:                                   # gesture-control settings shared with th
 except ImportError:                    # bridge_settings.py not copied next to this file: fixed rules
     BS = None
 
-N_OUT = 5
+N_OUT = 5                # classes; an output map of 5 x H x W is summed per class (class_spikes)
 WINDOW = 50              # frames (100 Hz) -> 0.5 s sliding window
 WINDOW_S = 0.5           # the window is measured in TIME: the camera client only sends frames that
 MIN_FRAMES = 25          # contain events (quiet scene: 10-20 per second instead of 100), so with a
@@ -62,6 +62,17 @@ REARM_MAX_S = 1.5        # ...or at the latest this long after the robot became 
 # Busy time per api_id without a real robot (no --require-clear = RViz animator, whose animations are
 # shorter than the Go2's): go2_animator.py plays Finger heart and Hello for 3.5 s
 TEST_BUSY_S = {1036: 3.5, 1016: 3.5}
+
+def class_spikes(p, n_out):
+    """One output frame's payload (float32 per output neuron, classes x H x W, as spleat-server sends it) ->
+    1.0/0.0 per class: did any position of the class spike. A 1x1 output map is one value per class; a
+    spatial head (training/snn model.head, outputs.height/width > 1 in the server config) has H*W per class."""
+    n = len(p) // 4
+    if n == 0 or len(p) % 4 or n % n_out:
+        return None
+    v = struct.unpack("<%df" % n, p)
+    per = n // n_out
+    return [1.0 if any(x > 0 for x in v[i * per:(i + 1) * per]) else 0.0 for i in range(n_out)]
 
 # output index -> (action, busy seconds, follow-up api_id or None, label)
 # action = sport api_id, or ("turn", degrees) = closed-loop turn (+ = left / anticlockwise)
@@ -445,13 +456,15 @@ class Bridge:
                         L, off = h - 0x40, k + 9
                     elif h == 0x58:
                         L, off = d[k + 9], k + 10
+                    elif h == 0x59 and k + 11 <= len(d):                 # >= 256 bytes: big spatial maps
+                        L, off = struct.unpack(">H", d[k + 9:k + 11])[0], k + 11
                     else:
                         continue
-                    if L != 4 * N_OUT or off + L > len(d):
+                    spikes = class_spikes(d[off:off + L], N_OUT) if off + L <= len(d) else None
+                    if spikes is None:
                         continue
-                    scores = struct.unpack(f"<{N_OUT}f", d[off:off + L])
                     with self.lock:
-                        self.hist.append((time.monotonic(), [1.0 if x > 0 else 0.0 for x in scores]))
+                        self.hist.append((time.monotonic(), spikes))
                         self.frames += 1
             except OSError as e:
                 self.connected = False

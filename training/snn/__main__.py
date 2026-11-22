@@ -3,6 +3,7 @@
     python -m training.snn check   --config training/configs/motion_buddy_40.yaml
     python -m training.snn prepare --config ...            # build the event-count cache
     python -m training.snn train   --config ... --run-dir runs/NAME   # prepare + check + train + export
+                                   [--set train.epochs=20 --set seed=43 ...]   # (check/prepare too)
     python -m training.snn qat     --run-dir runs/NAME [--set quant.layer_scaling=true ...]
                                                            # redo formats + QAT + export from float_best.pt
     python -m training.snn export  --run-dir runs/NAME     # re-export from runs/NAME/qat_best.pt
@@ -76,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("check", "prepare", "train"):
         p = sub.add_parser(name)
         p.add_argument("--config", required=True)
+        p.add_argument("--set", action="append", default=[], metavar="SECTION.KEY=VALUE",
+                       help="override a config value (parsed as YAML); a run saves the result in its config.yaml")
         if name in ("prepare", "train"):
             p.add_argument("--workers", type=int, default=min(16, os.cpu_count() or 4))
         if name == "train":
@@ -119,6 +122,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         cfg = load_config(args.config)
+        if args.set:
+            cfg = apply_overrides(cfg, args.set)
+            print(f"config overrides: {', '.join(args.set)}", flush=True)
         report = check(cfg)
         if args.command == "check":
             return 0 if report["verdict"] != "too_big" else 1
@@ -139,8 +145,8 @@ def main(argv: list[str] | None = None) -> int:
         save_config(cfg, run_dir / "config.yaml")
         shutil.copy(args.config, run_dir / "config.original.yaml")
         (run_dir / "run_info.json").write_text(json.dumps(
-            {"started": time.strftime("%Y-%m-%d %H:%M:%S"), "config": args.config, "git": git_info(),
-             "host": os.uname().nodename}, indent=2) + "\n")
+            {"started": time.strftime("%Y-%m-%d %H:%M:%S"), "config": args.config, "overrides": args.set,
+             "git": git_info(), "host": os.uname().nodename}, indent=2) + "\n")
 
         from .export import export_deployment
         from .train import load_qat_model, train

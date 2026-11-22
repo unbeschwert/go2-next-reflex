@@ -1,21 +1,20 @@
-// Training machines added in the dashboard (cloud GPU or Slurm cluster over SSH):
-// list (label, type, status; never host / user / paths), Add / Edit drawer with
+// Training machines added in the dashboard (GPU servers reached over SSH):
+// list (label, status; never host / user / paths), Add / Edit drawer with
 // SSH key selection or generation, the "Server ID" step (host key trust), Test
 // checklist and Prepare (datasets upload task with inline progress).
 
 import { api, detailKeys } from '../api.js';
 import {
   el, setText, act, btn, iconBtn, icon, chip, status, emptyState, placeholder, menuButton, drawer, field, input,
-  select, setOptions, segmented, collapsible, setFieldError, confirmDialog, checkbox, toast, setLogText, attachTip,
+  select, setOptions, collapsible, setFieldError, confirmDialog, checkbox, toast, setLogText, attachTip,
 } from '../ui.js';
 import { trackTask, onTaskUpdate } from '../tasks.js';
 
-const KIND_TEXT = { slurm: 'Slurm cluster', direct: 'GPU machine', ssh: 'GPU machine' };
 const PREPARE_DATASETS = [
-  { id: 'own', label: 'Our gestures (655 MB)' },
-  { id: 'organisers', label: 'Durance AI team dataset (3.9 GB)' },
+  { id: 'organisers', label: 'Durance AI team sessions 01-14 (sit, lay down, hello, dance)' },
+  { id: 'own', label: 'Our sessions 20-30 (heart, turn left, turn right)' },
 ];
-const FIELDS = ['id', 'label', 'kind', 'host', 'user', 'port', 'identity_file', 'ssh_host', 'workdir', 'slurm_script', 'python', 'max_submits_per_hour'];
+const FIELDS = ['id', 'label', 'host', 'user', 'port', 'identity_file', 'ssh_host', 'workdir', 'python', 'uv', 'max_submits_per_hour'];
 const KEY_PREF = { 'ssh-ed25519': 0, 'ecdsa-sha2-nistp256': 1, 'ecdsa-sha2-nistp384': 1, 'ecdsa-sha2-nistp521': 1, 'ssh-rsa': 2 };
 
 /** "My GPU box #2" -> "my-gpu-box-2" (backend: ^[a-z0-9][a-z0-9-]{1,30}$) */
@@ -109,7 +108,7 @@ export function createMachinesPanel(scope, { onChanged } = {}) {
       const testBtn = btn('Test', { kind: 'ghost', size: 'sm', icon: 'check' });
       testBtn.addEventListener('click', () => test(h, testBtn));
       const prepBtn = btn('Prepare', { kind: 'ghost', size: 'sm', icon: 'upload' });
-      attachTip(prepBtn, 'Upload the training script, riverops and datasets');
+      attachTip(prepBtn, 'Copy the code and riverops, install the training environment, upload dataset sessions');
       prepBtn.addEventListener('click', () => prepare(h, prepBtn));
       const editBtn = btn('Edit', { kind: 'ghost', size: 'sm', icon: 'sliders' });
       editBtn.addEventListener('click', () => openForm(h.id));
@@ -126,7 +125,7 @@ export function createMachinesPanel(scope, { onChanged } = {}) {
       return el('div', { class: 'machine' },
         el('div', { class: 'machine-main' },
           el('div', { class: 'machine-name' }, el('span', { class: 'cell-main', text: h.label || h.id }),
-            chip(KIND_TEXT[h.kind] || 'GPU machine', { kind: 'neutral', icon: h.kind === 'slurm' ? 'server' : 'cpu' })),
+            chip('GPU server', { kind: 'neutral', icon: 'cpu' })),
           status(h.ok ? 'ok' : (h.ok === false ? 'bad' : 'off'), h.detail || (h.ok ? 'reachable' : 'unknown')),
           el('div', { class: 'machine-actions' }, testBtn, prepBtn, editBtn, more)),
         extra);
@@ -168,10 +167,10 @@ export function createMachinesPanel(scope, { onChanged } = {}) {
   }
 
   async function prepare(h, b) {
-    const boxes = PREPARE_DATASETS.map((d) => ({ ...d, box: checkbox(d.label, { checked: d.id === 'own' }) }));
+    const boxes = PREPARE_DATASETS.map((d) => ({ ...d, box: checkbox(d.label, { checked: d.id === 'organisers' }) }));
     const yes = await confirmDialog({
       title: `Prepare ${h.label}`,
-      message: 'Uploads the training script and riverops to the machine, plus the datasets you choose. Uploads can take a while.',
+      message: 'Copies the repository code and the riverops wheel, installs the training environment (uv sync --group train) and uploads the dataset sessions you choose (data/motion_buddy_dataset). Only changed files move; the first time can take a while.',
       confirmLabel: 'Prepare',
       risk: 'normal',
       body: el('div', { class: 'stack-sm' }, el('div', { class: 'field-label', text: 'Datasets' }), ...boxes.map((x) => x.box.el)),
@@ -230,18 +229,12 @@ export function createMachinesPanel(scope, { onChanged } = {}) {
     let keys = keysIn;
     const editing = !!current;
     const v = current || {};
-    let kind = v.kind === 'slurm' ? 'slurm' : 'direct';
     const taken = new Set((hosts || []).map((h) => h.id));
 
     const nameIn = input({ value: v.label || '', maxLength: 40, placeholder: 'e.g. Cloud A100' });
     const idText = el('span', { class: 'mono' });
     const nameF = field('Name', nameIn);
     nameF.append(el('div', { class: 'field-hint' }, 'ID: ', idText, editing ? ' (fixed)' : ''));
-    const kindSeg = segmented([
-      { value: 'direct', label: 'GPU machine (direct)', icon: 'cpu', tip: 'A plain GPU machine such as a cloud VM: training runs in the background' },
-      { value: 'slurm', label: 'Slurm cluster', icon: 'server', tip: 'A cluster with sbatch / squeue' },
-    ], { label: 'Type', value: kind, size: 'md', onChange: (val) => { kind = val; kindSeg.set(val); sync(); } });
-    const kindF = el('div', { class: 'field' }, el('div', { class: 'field-label-row' }, el('span', { class: 'field-label', text: 'Type' })), kindSeg.el, el('div', { class: 'field-error', role: 'alert', hidden: true }));
     const hostIn = input({ value: v.host || '', placeholder: 'e.g. 203.0.113.7 or gpu.example.org', attrs: { spellcheck: 'false', autocapitalize: 'off' } });
     const userIn = input({ value: v.user || '', placeholder: 'e.g. ubuntu', attrs: { spellcheck: 'false', autocapitalize: 'off' } });
     const portIn = input({ type: 'number', min: '1', max: '65535', value: String(v.port || 22) });
@@ -259,10 +252,10 @@ export function createMachinesPanel(scope, { onChanged } = {}) {
 
     const workIn = input({ value: v.workdir || '~/durance-training', attrs: { spellcheck: 'false' } });
     const pyIn = input({ value: v.python || 'python3', attrs: { spellcheck: 'false' } });
-    const slurmIn = input({ value: v.slurm_script || '', placeholder: 'e.g. train_snn.sbatch', attrs: { spellcheck: 'false' } });
-    const workF = field('Work folder', workIn, { help: 'Folder on the machine for the training script, data and runs.' });
-    const pyF = field('Python', pyIn, { help: 'On the PATH or relative to the work folder, e.g. venv/bin/python.' });
-    const slurmF = field('Slurm script', slurmIn, { help: 'Batch script in the work folder that sbatch submits.' });
+    const uvIn = input({ value: v.uv || '', placeholder: 'uv on the PATH or ~/.local/bin/uv', attrs: { spellcheck: 'false' } });
+    const workF = field('Work folder', workIn, { help: 'Folder on the machine for a copy of the repository: code, data/ and runs/.' });
+    const pyF = field('Python', pyIn, { help: 'Plain Python 3 for small status scripts, e.g. python3.' });
+    const uvF = field('uv', uvIn, { help: 'Runs the training environment. Empty: found on the PATH, or installed to ~/.local/bin by Prepare.' });
 
     const aliasIn = input({ value: v.ssh_host || '', placeholder: 'e.g. my-gpu', attrs: { spellcheck: 'false' } });
     const aliasF = field('Use an ~/.ssh/config alias instead', aliasIn, { help: 'When set, host, user and port come from your ~/.ssh/config entry.' });
@@ -275,14 +268,14 @@ export function createMachinesPanel(scope, { onChanged } = {}) {
     const cancelBtn = btn('Cancel', { kind: 'ghost', onClick: () => d.close() });
     const serverIdBtn = editing ? btn('Server ID', { kind: 'ghost', icon: 'shield', onClick: () => showServerId(d, current.id, current.label) }) : null;
     const form = el('form', { class: 'stack', novalidate: true },
-      nameF, kindF, connRow, keyF, workF, pyF, slurmF, advanced, formError,
+      nameF, connRow, keyF, workF, pyF, uvF, advanced, formError,
       el('div', { class: 'form-actions' }, saveBtn, cancelBtn, el('span', { class: 'spacer' }), serverIdBtn));
     d.body.replaceChildren(form);
     d.setTitle(editing ? `Edit ${current.label}` : 'Add training machine');
 
     const fieldMap = {
-      label: nameF, id: nameF, kind: kindF, host: hostF, user: userF, port: portF, identity_file: keyF,
-      workdir: workF, python: pyF, slurm_script: slurmF, ssh_host: aliasF, max_submits_per_hour: maxF,
+      label: nameF, id: nameF, host: hostF, user: userF, port: portF, identity_file: keyF,
+      workdir: workF, python: pyF, uv: uvF, ssh_host: aliasF, max_submits_per_hour: maxF,
     };
 
     function newId() {
@@ -310,7 +303,6 @@ export function createMachinesPanel(scope, { onChanged } = {}) {
       setText(idText, newId());
       const alias = aliasIn.value.trim() !== '';
       connRow.hidden = alias;
-      slurmF.hidden = kind !== 'slurm';
     }
 
     nameIn.addEventListener('input', sync);
@@ -351,7 +343,6 @@ export function createMachinesPanel(scope, { onChanged } = {}) {
       const body = {
         id: newId(),
         label: nameIn.value.trim(),
-        kind,
         host: alias ? '' : hostIn.value.trim(),
         user: alias ? '' : userIn.value.trim(),
         port: Number.isInteger(port) ? port : 22,
@@ -359,7 +350,7 @@ export function createMachinesPanel(scope, { onChanged } = {}) {
         ssh_host: alias,
         workdir: workIn.value.trim(),
         python: pyIn.value.trim() || 'python3',
-        slurm_script: kind === 'slurm' ? slurmIn.value.trim() : '',
+        uv: uvIn.value.trim(),
         max_submits_per_hour: Number(maxIn.value) || 20,
       };
       const saved = await act(saveBtn, () => api.post('/train/machines', body, { signal: scope.signal }), {

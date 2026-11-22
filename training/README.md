@@ -70,6 +70,16 @@ open runs/<run>/deploy/DEPLOY.md
 
 You need SSH key access to the server (`ssh user@host` must work without a password prompt).
 
+**One-off changes without a new YAML file:** `check`, `prepare` and `train` take `--set section.key=value`
+(repeatable, the value is parsed as YAML), e.g. `python -m training.snn train --config ... --run-dir runs/x
+--set seed=43 --set train.epochs=10`. The run's `config.yaml` holds the result and `run_info.json` lists the
+overrides. `qat` takes `--set` too.
+
+**From the dashboard:** Training → New run does the same on a GPU machine added there: pick a config of
+`training/configs/` (the default recipe first), change values in the form (each becomes a `--set`), dry run,
+start, follow the log, fetch the run to `runs/`; Board → Models then builds its firmware and installs it on
+the board ([dashboard/README.md](../dashboard/README.md#training)).
+
 ## What a run does
 
 1. **Check.** Validate the config, propagate shapes, and estimate FPGA memory. If the model can't fit, it stops before using the GPU (`fpga.fail_on_overflow`).

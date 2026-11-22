@@ -21,12 +21,11 @@ ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,30}$")
 HOST_RE = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$|^\[?[0-9a-fA-F:]{2,39}\]?$")
 USER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,31}$")
 DIR_RE = re.compile(r"^~?[A-Za-z0-9_./-]{1,200}$")
-FILE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 PY_RE = re.compile(r"^[A-Za-z0-9_./-]{1,100}$")
 KEY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 STANDARD_KEYS = {"id_ed25519", "id_ecdsa", "id_rsa", "id_ed25519_sk", "id_ecdsa_sk"}
-EDITABLE = ("id", "label", "kind", "host", "user", "port", "identity_file", "ssh_host", "workdir", "slurm_script",
-            "python", "max_submits_per_hour")
+EDITABLE = ("id", "label", "host", "user", "port", "identity_file", "ssh_host", "workdir", "python", "uv",
+            "max_submits_per_hour")
 
 
 def _toml(clusters: list[ClusterCfg]) -> str:
@@ -64,7 +63,7 @@ class Machines:
 
     # ---------------------------------------------------------------- list / edit
     def summary(self) -> list[dict]:
-        return [{"id": c.id, "label": c.label, "kind": c.kind} for c in self.cfg.clusters]
+        return [{"id": c.id, "label": c.label} for c in self.cfg.clusters]
 
     def details(self, mid: str) -> dict:
         c = self._get(mid)
@@ -86,14 +85,14 @@ class Machines:
                 setattr(c, k, data[k])
         c.label = re.sub(r"[\x00-\x1f<>]", "", str(c.label))[:40].strip() or "GPU machine"
         checks = [("id", ID_RE, c.id), ("workdir", DIR_RE, c.workdir), ("python", PY_RE, c.python)]
+        if c.uv:
+            checks.append(("uv", PY_RE, c.uv))
         if c.ssh_host:
             checks.append(("ssh_host", re.compile(r"^[A-Za-z0-9_.-]{1,64}$"), c.ssh_host))
         else:
             checks.append(("host", HOST_RE, c.host))
             if c.user:
                 checks.append(("user", USER_RE, c.user))
-        if c.kind == "slurm":
-            checks.append(("slurm_script", FILE_RE, c.slurm_script))
         for name, rx, v in checks:
             if not isinstance(v, str) or not rx.match(v):
                 raise HTTPException(422, f"{name}: invalid value")

@@ -26,6 +26,19 @@ function metric(model, key) {
   return fmt.isNum(v) ? v : -Infinity;
 }
 
+function problemsOf(m) {
+  return Array.isArray(m.problems) ? m.problems : [];
+}
+
+function modelSub(m) {
+  if (m.kind === 'setup') {
+    const f = m.formats || {};
+    return ['run', f.weights ? `weights ${f.weights}` : null, m.firmware ? m.firmware.label : 'no firmware yet',
+      m.metrics && m.metrics.kind ? `${m.metrics.kind.replace('_', '-')} accuracy` : null].filter(Boolean).join(' · ');
+  }
+  return [m.source, m.md5 ? String(m.md5).slice(0, 8) : null].filter(Boolean).join(' · ');
+}
+
 export async function mount(root, scope, app) {
   let st = null; // /board/status
   let autostart = null;
@@ -173,6 +186,7 @@ export async function mount(root, scope, app) {
         ['Model MD5', model.md5 ? el('code', { text: String(model.md5_full || model.md5) }) : null],
         ['Weights MD5', b.weights_md5 ? el('code', { text: String(b.weights_md5) }) : undefined],
         ['Gestures', model.classes || null],
+        ['Firmware', b.firmware && b.firmware.md5 ? `${b.firmware.label || 'unknown'}${b.firmware.weights ? ` · weights ${b.firmware.weights}, potentials ${b.firmware.potentials}` : ''} (md5 ${b.firmware.md5})` : undefined],
         ['Input size', fmt.isNum(b.input_size) ? `${b.input_size}×${b.input_size}` : (fmt.isNum(model.input) ? `${model.input}×${model.input}` : null)],
         ['Scaling', b.scaling != null ? fmt.describe(b.scaling) : undefined],
         ['ROS domain', b.ros_domain != null ? String(b.ros_domain) : undefined],
@@ -199,7 +213,7 @@ export async function mount(root, scope, app) {
 
   // ================================================================ Models tab
   const restoreMenu = menuButton([
-    { label: 'Restore the previous weights', icon: 'reset', onSelect: (b) => restore(b) },
+    { label: 'Restore the previous model (weights, or the whole setup)', icon: 'reset', onSelect: (b) => restore(b) },
   ], { label: 'More model actions' });
   const modelsTable = dataTable({
     caption: 'Models available for deployment',
@@ -212,9 +226,10 @@ export async function mount(root, scope, app) {
         key: 'name', label: 'Model', sort: strSort('name'),
         render: (m) => el('div', null,
           el('div', { class: 'row', style: { flexWrap: 'nowrap' } }, el('span', { class: 'cell-main', text: m.name || m.id }), m.deployed ? chip('Deployed', { kind: 'accent', icon: 'check' }) : null),
-          el('div', { class: 'cell-sub', text: [m.source, m.md5 ? String(m.md5).slice(0, 8) : null].filter(Boolean).join(' · ') })),
+          el('div', { class: 'cell-sub', text: modelSub(m) }),
+          problemsOf(m).length ? el('div', { class: 'cell-sub', style: { color: 'var(--warn, #b26b00)' }, text: problemsOf(m).join(' · ') }) : null),
       },
-      { key: 'arch', label: 'Arch', sort: strSort('arch') },
+      { key: 'arch', label: 'Network', sort: strSort('arch') },
       { key: 'input', label: 'Input', numeric: true, render: (m) => (fmt.isNum(m.input) ? `${m.input}×${m.input}` : fmt.DASH) },
       { key: 'classes', label: 'Gestures' },
       { key: 'test', label: 'Test', numeric: true, sort: (a, b) => metric(a, 'test') - metric(b, 'test'), render: (m) => fmt.accuracy(m.metrics && m.metrics.test) },
@@ -223,6 +238,17 @@ export async function mount(root, scope, app) {
         key: 'deploy', label: '', cls: 'actions',
         render: (m) => {
           if (m.deployed) return el('span', { class: 'small muted', text: 'On the board' });
+          if (m.kind === 'setup') { // a run of our pipeline: installs firmware + configs + weights
+            if (!m.firmware) {
+              const fb = btn('Build firmware', { kind: 'ghost', size: 'sm', icon: 'cpu', tip: 'riversdk.dev job via scripts/firmware_job.py (6-8 min; an identical job is reused)' });
+              fb.addEventListener('click', () => buildFirmware(m, fb));
+              return fb;
+            }
+            const b = btn('Install', { kind: 'ghost', size: 'sm', icon: 'upload', tip: `Firmware ${m.firmware.label}, configs, weights and classes` });
+            b.disabled = problemsOf(m).length > 0;
+            b.addEventListener('click', () => deploy(m, m.classes, b));
+            return b;
+          }
           if (m.classes === 'own' || m.classes === 'dataset') {
             const b = btn('Deploy', { kind: 'ghost', size: 'sm', icon: 'upload' });
             b.addEventListener('click', () => deploy(m, m.classes, b));
@@ -237,7 +263,7 @@ export async function mount(root, scope, app) {
     ],
   });
   tabs.panel('models').append(el('section', { class: 'card card-flush' },
-    el('div', { class: 'card-head' }, el('div', { class: 'card-heading' }, el('h2', { class: 'card-title', text: 'Models' }), el('span', { class: 'card-sub', text: 'Deploying backs up the current weights and restarts inference in test mode' })), restoreMenu),
+    el('div', { class: 'card-head' }, el('div', { class: 'card-heading' }, el('h2', { class: 'card-title', text: 'Models' }), el('span', { class: 'card-sub', text: 'Runs (runs/) install their firmware, configs and weights; weights files replace only weights.txt. Both back up first and restart inference in test mode.' })), restoreMenu),
     modelsTable.el));
 
   async function loadModels() {
@@ -260,10 +286,16 @@ export async function mount(root, scope, app) {
       app.refreshOverview();
     }
   }
+  async function buildFirmware(model, b) {
+    const res = await act(b, () => api.post('/board/firmware', { model_id: model.id }, { risk: 'warn', signal: scope.signal }));
+    if (!res) return;
+    await trackTask(res, `Firmware for ${model.name}`);
+    if (scope.alive) loadModels();
+  }
   async function restore(b) {
     const res = await act(b, () => api.post('/board/restore', {}, { risk: 'warn', signal: scope.signal }));
     if (!res) return;
-    await trackTask(res, 'Restore previous weights');
+    await trackTask(res, 'Restore the previous model');
     if (scope.alive) {
       loadModels();
       statusPoll.now();

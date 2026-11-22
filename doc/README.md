@@ -20,6 +20,7 @@ Most of this is condensed from the organisers' RIVER SDK docs at https://riversd
 | [fpga-debugging.md](fpga-debugging.md) | **Learning record**: why the FPGA and the simulation disagreed (potentials never reset), each hypothesis and its test |
 | [go2-kria-overview.md](go2-kria-overview.md) | ROS 2 entry points, topics, reference action map and Yocto build for the Kria |
 | [gesture-pipeline.md](gesture-pipeline.md) | FPGA inference, Python bridge for the Go2, and [laptop simulation in Docker with RViz](gesture-pipeline.md#docker-and-rviz-on-wayland) |
+| [../dashboard/README.md](../dashboard/README.md) | **Web dashboard**: board, live view, simulator, recording, dataset with network spikes, training our YAML configs on GPU machines, installing runs (firmware + configs + weights) on the board |
 
 ## End-to-end workflow
 
@@ -32,6 +33,7 @@ Most of this is condensed from the organisers' RIVER SDK docs at https://riversd
  5. Firmware       riversdk.dev "firmware jobs" (model.json)
                    ──► spleat.bit.bin + spleat.dtbo                  (deploy-model.md)
  6. Deploy         scp bitstream, config.yaml, metavision_camera.json, weights.txt to the Kria
+                   (or dashboard: Board → Models → Install, which does steps 5-6 for a run)
  7. ROS 2          install go2-kria's Humble overlay, copy kria/ scripts, check output order
  8. Run            inference.sh start --headless, then inference.sh robot --dry-run
 ```

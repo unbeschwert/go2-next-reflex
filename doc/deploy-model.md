@@ -2,6 +2,8 @@
 
 Condensed from the RIVER SDK cheatsheet "Deploy an SNN". Copy the files with `scp`, or with `river-tools deploy` (see [capture-data.md](capture-data.md)).
 
+**From the dashboard** ([dashboard/README.md](../dashboard/README.md#models)): Board → Models lists every run under `runs/` that has a `deploy/` folder. **Build firmware** runs `scripts/firmware_job.py` for it (section 1), and **Install** does sections 1–4 in one step: firmware, server config, camera downsampling and frame rate, `weights.txt` and `/root/model_classes`, with a backup first (Restore puts it back) and a rollback if the firmware does not load. It refuses a run whose files don't fit the board (no firmware for its network and formats, a `scaling` from before the fix below, classes the bridge doesn't know).
+
 ## What has to change
 
 | File | Where on the Kria | What it is |
@@ -126,4 +128,4 @@ systemctl restart spleat-server.service      # or start by hand to see logs, see
 journalctl -u spleat-server.service -f
 ```
 
-The server then sends one result per frame over TCP (port 3333): a 4-byte length followed by CBOR `{"id", "payload", "latency", "error"}`. `payload` holds `outputs.channels` × float32 (× height × width for a spatial head; the readers here, `kria/live_gesture_bridge.py` and `scripts/fpga.py`, still expect one value per class). `gesture_node` in `go2-kria` reads these.
+The server then sends one result per frame over TCP (port 3333): a 4-byte length followed by CBOR `{"id", "payload", "latency", "error"}`. `payload` holds `outputs.channels` × float32 (× height × width for a spatial head, class-major: all positions of class 0 first). `kria/live_gesture_bridge.py` and `kria/snn_input_viewer.py` accept any `5 × H × W` map and count a class as firing in a frame when any of its positions spiked; `scripts/fpga.py`'s client takes the output shape (`fpga_accuracy.py` sums the positions). `gesture_node` in `go2-kria` reads these.

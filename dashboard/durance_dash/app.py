@@ -350,20 +350,40 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     async def board_logs(name: str = "bridge", lines: int = 200, u: str = Depends(user)):
         return await S.board.logs(name, lines)
 
+    models_dir = Path(cfg.paths.models).expanduser()
+    runs_dir = Path(cfg.paths.runs).expanduser() if cfg.paths.runs else None
+
     @app.get("/api/board/models")
     async def board_models(u: str = Depends(user)):
         raw = await S.board.raw_status() if S.live.source == "board" else {}
         md5 = (raw.get("model") or {}).get("md5")
-        ms = await asyncio.to_thread(M.scan, Path(cfg.paths.models).expanduser())
+        ms = await asyncio.to_thread(M.scan, models_dir, runs_dir)
+        out = []
         for m in ms:
+            m = M.public(m)
             m["deployed"] = m["md5"] == md5
-        return {"models": ms, "board_values": (raw.get("model") or {}).get("values")}
+            out.append(m)
+        return {"models": out, "board_values": (raw.get("model") or {}).get("values")}
 
     @app.post("/api/board/deploy")
     async def board_deploy(b: dict = Depends(body), u: str = Depends(user)):
-        m = await asyncio.to_thread(M.find, Path(cfg.paths.models).expanduser(), str(b.get("model_id")))
+        m = await asyncio.to_thread(M.find, models_dir, str(b.get("model_id")), runs_dir)
         if m is None:
             raise HTTPException(404, "unknown model")
+        if m.get("kind") == "setup":                  # a run of our pipeline: firmware + configs + weights
+            if m.get("problems"):
+                raise HTTPException(409, f"{m['name']} cannot be installed: " + "; ".join(m["problems"]))
+            metrics = m.get("metrics") or {}
+            score = f" (fixed-point test {metrics['test']:.1%})" if metrics.get("test") is not None else ""
+            await board_change(u, f"install {m['name']}", bool(b.get("confirm")),
+                               f"Install {m['name']}{score} as the board's setup? This replaces the FPGA firmware "
+                               f"({m['firmware']['label']}, weights {m['formats']['weights']}), the server config "
+                               f"({m['input']}×{m['input']} input), the camera downsampling ({m['downsampling']}), "
+                               f"weights.txt and the classes ({m['classes']}). Everything is backed up first (Restore "
+                               "puts it back); inference restarts in test mode (robot mode must be started again by hand).")
+            t = S.tasks.start("board.deploy", f"Install {m['name']}", u, lambda logf: S.board.deploy_setup(u, m, logf),
+                              exclusive="board")
+            return {"task_id": t.id}
         classes = b.get("classes") or m.get("classes")
         if classes not in ("own", "dataset"):
             raise HTTPException(422, "classes: own or dataset (which gestures were these weights trained on?)")
@@ -378,8 +398,35 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.post("/api/board/restore")
     async def board_restore(b: dict = Depends(body), u: str = Depends(user)):
-        await board_change(u, "restore weights", bool(b.get("confirm")), "Put back the weights from before the last deploy?")
-        t = S.tasks.start("board.restore", "Restore previous weights", u, lambda logf: S.board.restore(u, logf), exclusive="board")
+        await board_change(u, "restore", bool(b.get("confirm")), "Put back what the board ran before the last deploy "
+                           "(the weights, or the whole setup with firmware and configs if a run was installed)?")
+        t = S.tasks.start("board.restore", "Restore the previous model", u, lambda logf: S.board.restore(u, logf),
+                          exclusive="board")
+        return {"task_id": t.id}
+
+    @app.post("/api/board/firmware")
+    async def board_firmware(b: dict = Depends(body), u: str = Depends(user)):
+        """Build (or reuse) the firmware for a run on riversdk.dev: scripts/firmware_job.py submit --download."""
+        m = await asyncio.to_thread(M.find, models_dir, str(b.get("model_id")), runs_dir)
+        if m is None or m.get("kind") != "setup":
+            raise HTTPException(404, "unknown run")
+        if m.get("firmware"):
+            raise HTTPException(409, f"{m['name']} already has firmware: {m['firmware']['label']}")
+        script = Path(cfg.paths.repo).expanduser() / "scripts" / "firmware_job.py" if cfg.paths.repo else None
+        if not script or not script.is_file():
+            raise HTTPException(503, "scripts/firmware_job.py not found (needs the repository checkout)")
+        need(bool(b.get("confirm")), f"Build the firmware for {m['name']} on riversdk.dev? A job takes 6-8 minutes "
+             "(an identical finished job is reused). It needs your riversdk.dev session in ~/.config/riversdk/session.")
+        args = ["uv", "run", "--project", str(script.parent.parent), str(script), "submit", "--run", m["run_dir"], "--download"]
+
+        async def build(logf):
+            from .sshrun import run_local
+            r = await run_local(args, timeout=3600, cwd=str(script.parent.parent), log=logf)
+            if not r.ok:
+                raise HTTPException(502, f"firmware_job.py failed (exit {r.rc}): {r.out[-300:]}")
+            S.audit.log(u, "board.firmware", {"run": m["name"]})
+            return {"run": m["name"]}
+        t = S.tasks.start("board.firmware", f"Firmware for {m['name']}", u, build, exclusive=f"firmware-{m['id']}")
         return {"task_id": t.id}
 
     @app.post("/api/board/software")
@@ -659,7 +706,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.post("/api/train/machines")
     async def machine_save(b: dict = Depends(body), u: str = Depends(user)):
         c = await asyncio.to_thread(S.machines.save, b)
-        S.audit.log(u, "train.machine.save", {"machine": c.id, "kind": c.kind})
+        S.audit.log(u, "train.machine.save", {"machine": c.id})
         return S.machines.details(c.id)
 
     @app.post("/api/train/machines/{mid}/delete")
@@ -703,9 +750,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if not isinstance(datasets, list):
             raise HTTPException(422, "datasets: a list")
         d = S.machines.details(mid)
-        need(bool(b.get("confirm")), f"Copy the training script, riverops"
-             + (f" and {len(datasets)} dataset(s) (several GB)" if datasets else "")
-             + f" to '{d['label']}'? Uploads can take a while.")
+        need(bool(b.get("confirm")), f"Copy the repository code and the riverops wheel to '{d['label']}', install the "
+             "training environment (uv sync --group train, ~3 GB the first time)"
+             + (f" and upload the session folders of {len(datasets)} dataset(s) (several GB)" if datasets else "")
+             + "? This can take a while.")
         t = S.tasks.start("train.prepare", f"Prepare {d['label']}", u,
                           lambda logf: S.training.prepare(u, mid, datasets, logf), exclusive=f"prepare-{mid}")
         return {"task_id": t.id}

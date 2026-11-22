@@ -1,19 +1,37 @@
-"""Model training on a GPU cluster over SSH (Slurm): submit, watch, cancel, collect results."""
+"""Training of our SNN pipeline on GPU servers added in the dashboard, over SSH.
+
+The pipeline is the repository's `python -m training.snn` with a YAML config (training/README.md); nothing
+about networks or datasets is hard-coded here. The New run form lists the configs in training/configs/
+(the presets), shows each one's values for a few common keys (the flags) and turns every changed value into a
+`--set section.key=value` override, validated with the pipeline's own config loader before anything starts.
+
+A machine's work folder is a copy of the repository, like remote/setup.sh and remote/train.sh make it:
+- Prepare: installs uv if missing, copies the code (git's tracked and untracked-but-not-ignored files) and
+  the proprietary riverops wheel (never committed), installs the training environment
+  (`uv sync --group train`) and uploads the dataset sessions you choose (data/motion_buddy_dataset/NN/).
+- Start: copies the code again (the run uses exactly this checkout), then
+  `uv run --group train python -m training.snn train --config <yaml> --run-dir runs/<name> [--set ...]`
+  in the background (setsid nohup); the dashboard tracks its process.
+- Fetch: copies runs/<name>/ to this laptop's runs/, where the Board page can install it.
+Replies never contain host names, user names or paths.
+"""
 from __future__ import annotations
 
 import base64
 import json
 import logging
 import re
+import shutil
+import subprocess
+import sys
 import time
 from collections import deque
 from pathlib import Path
 
 from fastapi import HTTPException
 
-from .config import project_file
 from .errors import need
-from .sshrun import SSH, q
+from .sshrun import SSH, q, run_local
 
 logger = logging.getLogger("durance.training")
 
@@ -44,90 +62,92 @@ def reason(err: str) -> str:
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
 RUN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,80}$")
 JOB_RE = re.compile(r"^\d{1,12}$")
+SESSION_RE = re.compile(r"^\d{2}$")
+DEFAULT_CONFIG = "training/configs/motion_buddy_80_v4.yaml"     # the default recipe (training/README.md)
+# Dataset sessions Prepare can upload: the organisers' (Durance AI team) sessions and our own recordings.
+DATASETS = {"organisers": ("Durance AI team sessions 01-14 (sit, lay down, hello, dance)", lambda n: n < 20),
+            "own": ("Our sessions 20-30 (heart, turn left, turn right)", lambda n: n >= 20)}
 
-DATASETS = {
-    "organisers": {"label": "Organisers' gestures (sit / lay down / hello / dance), val 13, test 04-06",
-                   "args": ["--zip", "data/motion_buddy_full.zip", "--val", "13", "--test", "04,05,06"]},
-    "own": {"label": "Our gestures (heart / turn left / turn right), sessions 20-30, val 28, test 29+30",
-            "args": ["--zip", "data/own_gestures_s20-30.zip", "--val", "28", "--test", "29,30",
-                     "--class-names", "Heart,Turn left 360,Turn right 360,Follow me,No gesture",
-                     "--unused", "3", "--mirror", "1:2"]},
-}
-ARCHS = {"nb40": "40x40, runs on the board's current 8-bit firmware", "v3": "40x40 team v3 net (needs a new firmware)",
-         "fast80": "80x80 input, nb40 cost (needs a new firmware)", "best80": "80x80, firmware (3), 16-bit",
-         "c40": "compact 40x40 (needs a new firmware)", "slim80": "compact 80x80 (needs a new firmware)"}
-# flag: (type, min, max, default, help)
+# Config keys the form offers (any other key can still be changed in the YAML file).
+# key: (type, min or choices, max, help)
 FLAGS = {
-    "epochs": ("int", 1, 500, 5, "float training epochs"),
-    "qat-epochs": ("int", 0, 300, 50, "quantisation-aware epochs (8-bit, as the FPGA runs it)"),
-    "qat-lr-scale": ("float", 0.01, 1.0, 1.0, "QAT learning rate = lr x this"),
-    "qat-bits": ("choice", ["8h", "16", "8h,16"], None, "8h", "weight format: 8h = the 8-bit firmware, 16 = firmware (3)"),
-    "batch-size": ("int", 4, 128, 16, ""),
-    "lr": ("float", 1e-5, 0.1, 0.003, "learning rate"),
-    "weight-decay": ("float", 0.0, 0.1, 1e-4, ""),
-    "ce-weight": ("float", 0.0, 5.0, 0.5, "cross-entropy term next to the spike-count loss"),
-    "spike-reg": ("float", 0.0, 20.0, 0.0, "SynOps penalty: fewer spikes = lower FPGA latency"),
-    "learnable-leak": ("int", 0, 1, 0, "1 = every layer learns its own leak"),
-    "initial-tau": ("float", 1.01, 50.0, 14.29, "starting neuron time constant (2 = fast leak)"),
-    "layer-dropout": ("float", 0.0, 0.5, 0.0, "dropout in the middle layers (training only)"),
-    "binom-drop": ("float", 0.0, 0.9, 0.0, "event dropout (binomial thinning)"),
-    "time-shift": ("int", 0, 50, 0, "max frames the clip is moved in time"),
-    "polarity-p": ("float", 0.0, 1.0, 0.0, "probability of swapping ON/OFF"),
-    "mixup-p": ("float", 0.0, 1.0, 0.0, "probability per batch of mixup"),
-    "max-shift": ("int", -1, 16, -1, "pixel shift (-1 = size/16)"),
-    "flip": ("int", 0, 1, 0, "left-right flip (own gestures: swaps left/right labels)"),
-    "aug": ("choice", ["basic", "strong"], None, "basic", "strong = zoom/rotation/shift warp"),
-    "warmup-steps": ("int", 0, 100, 40, "context frames before each clip (the FPGA never resets)"),
-    "quiet-prob": ("float", 0.0, 0.5, 0.0, "share of synthetic quiet scenes labelled no-gesture"),
-    "noaction-weight": ("float", 0.1, 10.0, 1.0, "loss weight of no-action clips"),
-    "seed": ("int", 0, 1_000_000, 42, ""),
+    "seed": ("int", 0, 1_000_000, "random seed; runs differ by ~7 test points between seeds, so compare 2+"),
+    "train.epochs": ("int", 1, 500, "float training epochs"),
+    "train.batch_size": ("int", 1, 512, ""),
+    "train.lr": ("float", 1e-6, 0.1, "learning rate"),
+    "train.optimizer": ("choice", ["adam", "adamw"], None, "Adam (L2 in the gradient) or AdamW (decoupled decay)"),
+    "train.weight_decay": ("float", 0.0, 1.0, ""),
+    "train.loss": ("choice", ["mse", "ce", "ce+mse"], None, "spike-count targets (mse) and/or cross-entropy"),
+    "train.average_last": ("int", 0, 100, "average the weights of the last N epochs (BatchNorm statistics recomputed)"),
+    "quant.qat_epochs": ("int", 0, 200, "quantization-aware epochs after float training"),
+    "quant.qat_lr": ("float", 1e-7, 0.01, ""),
+    "model.neuron.learnable_leak": ("bool", None, None, "every layer learns its own leak"),
+    "data.train": ("sessions", None, None, "training sessions (folders of data/motion_buddy_dataset), e.g. 01,02,03"),
+    "data.val": ("sessions", None, None, "validation sessions (model selection)"),
+    "data.test": ("sessions", None, None, "test sessions (reported only)"),
+    **{f"augment.{a}.p": ("float", 0.0, 1.0, f"probability of the {a.replace('_', ' ')} augmentation")
+       for a in ("speed", "time_shift", "affine", "flip", "dropout", "rate", "polarity", "noise", "hot_pixels",
+                 "cutout", "warm_start", "mixup")},
 }
-PRESETS = [
-    {"id": "base", "label": "Our recipe (r9-base)", "args": {"epochs": 5, "qat-epochs": 50, "qat-lr-scale": 1.0, "flip": 0}},
-    {"id": "leak", "label": "+ fast learnable leak (r9-leak)", "args": {"epochs": 5, "qat-epochs": 50, "qat-lr-scale": 1.0,
-                                                                         "flip": 0, "learnable-leak": 1, "initial-tau": 2.0}},
-    {"id": "aug", "label": "+ team augmentation (r9-aug)", "args": {"epochs": 5, "qat-epochs": 50, "qat-lr-scale": 1.0, "flip": 0,
-                                                                     "max-shift": 4, "binom-drop": 0.4, "time-shift": 20,
-                                                                     "polarity-p": 0.3, "mixup-p": 0.5, "layer-dropout": 0.2}},
-    {"id": "sparse", "label": "Sparse / fast on the FPGA (spike-reg 3, like the live model)",
-     "args": {"epochs": 5, "qat-epochs": 50, "qat-lr-scale": 1.0, "spike-reg": 3.0}},
-]
 
 RUNS_SCRIPT = r'''
-import glob, json, os, sys
+import glob, json, os, re
 out = []
 for m in sorted(glob.glob("runs/*/metrics.json"), key=os.path.getmtime, reverse=True)[:200]:
     try:
         j = json.load(open(m))
     except Exception:
         continue
-    res = j.get("results", {}); pick = j.get("deployable_pick")
-    r = res.get(pick) or {}
-    a = j.get("args", {})
-    d = os.path.basename(os.path.dirname(m))
-    out.append({"name": d, "job": d.rsplit("-", 1)[-1] if d.rsplit("-", 1)[-1].isdigit() else None,
-                "arch": (j.get("arch") or {}).get("name"), "dataset": os.path.basename(a.get("zip", "")),
-                "val": r.get("val"), "test": r.get("test"), "synops": r.get("synops"),
-                "trig_correct": (r.get("trig") or {}).get("correct"), "trig_false": (r.get("trig") or {}).get("false"),
-                "pick": pick, "finished": os.path.getmtime(m),
-                "files": sorted(os.path.basename(f) for f in glob.glob(os.path.dirname(m) + "/weights_q*.txt"))})
+    d = os.path.dirname(m)
+    r = j.get("fixed_point") or j.get("qat") or j.get("float") or {}
+    try:
+        name = re.search(r"^name:\s*(\S+)", open(d + "/config.yaml").read(), re.M).group(1)
+    except Exception:
+        name = None
+    out.append({"name": os.path.basename(d), "config": name, "val": r.get("val_acc"), "test": r.get("test_acc"),
+                "kind": "fixed point" if j.get("fixed_point") else None, "finished": os.path.getmtime(m),
+                "deployable": os.path.isfile(d + "/deploy/weights.txt"), "classes": j.get("classes")})
 print(json.dumps(out))
 '''
 
+JOBS_FILE = ".dd_jobs"          # "<pid> <run name>" per started run, in the work folder
 
-DIRECT_JOBS = ".dd_jobs"        # direct machines: "<pid> <run name>" per started run, in the work folder
+
+def pipeline(repo: Path):
+    """The repository's training.snn package (config loader and --set overrides; numpy + pyyaml only)."""
+    if not (repo / "training" / "snn" / "__main__.py").is_file():
+        raise HTTPException(503, "training/snn not found: training needs the repository checkout")
+    if str(repo) not in sys.path:
+        sys.path.insert(0, str(repo))
+    from training.snn import __main__ as cli
+    from training.snn import config as conf
+    return cli, conf
+
+
+def get_key(cfg_dict: dict, key: str):
+    node = cfg_dict
+    for part in key.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
+def form_value(kind: str, v):
+    return ",".join(str(x) for x in v) if kind == "sessions" and isinstance(v, list) else v
 
 
 class Training:
-    """Training on GPU machines added in the dashboard. kind "slurm": sbatch / squeue / scancel; kind "direct"
-    (any GPU machine, e.g. a cloud VM): the dashboard starts train_snn_v9.py in the background (setsid nohup)
-    and tracks its process. Replies never contain host names, user names or paths."""
+    """Our pipeline on GPU servers added in the dashboard (SSH): the dashboard starts each run in the
+    background (setsid nohup) and tracks its process."""
 
     def __init__(self, cfg, audit, machines=None):
         self.cfg, self.audit, self.machines = cfg, audit, machines
+        self.repo = Path(cfg.paths.repo).expanduser() if cfg.paths.repo else None
         self.ssh: dict[str, SSH] = {}
         self._health: dict[str, tuple[float, dict]] = {}
         self._runs: dict[str, tuple[float, list]] = {}
+        self._configs: tuple[tuple, list] | None = None
         self.submits: deque = deque()
         self._jobs_n: dict[str, int] = {}
         self._refreshing = False
@@ -202,6 +222,141 @@ class Training:
             raise HTTPException(502, f"{what} failed: {detail}")
         return r
 
+    @staticmethod
+    def uv(c) -> str:
+        """Shell snippet: the machine's uv (configured, on PATH, or where Prepare puts it)."""
+        return q(c.uv) if c.uv else '"$(command -v uv || echo $HOME/.local/bin/uv)"'
+
+    def _repo(self) -> Path:
+        if not self.repo:
+            raise HTTPException(503, "training needs the repository checkout (paths.repo)")
+        return self.repo
+
+    # ---------------------------------------------------------------- configs (the form)
+    def configs(self) -> list[dict]:
+        """Every YAML config under training/configs/, resolved with the pipeline's loader (base: included)."""
+        repo = self._repo()
+        root = Path(self.cfg.paths.training_configs).expanduser() if self.cfg.paths.training_configs else repo / "training" / "configs"
+        files = sorted(root.rglob("*.yaml"))
+        key = tuple((str(f), f.stat().st_mtime_ns) for f in files)
+        if self._configs and self._configs[0] == key:
+            return self._configs[1]
+        _, conf = pipeline(repo)
+        out = []
+        for f in files:
+            rel = str(f.relative_to(repo)) if f.is_relative_to(repo) else str(f)
+            try:
+                c = conf.load_config(f)
+            except Exception as e:  # noqa: BLE001 - a broken config is listed as such, not fatal
+                logger.info("config %s does not load: %s", rel, e)
+                continue
+            d = c.to_dict()
+            size, layers = c.data.size, len(c.model.layers)
+            label = (f"{rel.removeprefix('training/configs/')} · {size}×{size}, {layers} layers, {c.train.epochs} epochs, "
+                     f"val {','.join(c.data.val)} / test {','.join(c.data.test)}")
+            out.append({"id": rel, "label": label, "name": c.name, "classes": list(c.data.classes), "data_root": c.data.root,
+                        "sessions": sorted(set(c.data.train) | set(c.data.val) | set(c.data.test)),
+                        "args": {k: form_value(FLAGS[k][0], get_key(d, k)) for k in FLAGS if get_key(d, k) is not None}})
+        out.sort(key=lambda x: (x["id"] != DEFAULT_CONFIG, x["id"].count("/"), x["id"]))
+        self._configs = (key, out)
+        return out
+
+    def options(self) -> dict:
+        presets = self.configs()
+        flags = []
+        for k, (t, lo, hi, h) in FLAGS.items():
+            flags.append({"key": k, "type": "str" if t == "sessions" else t,
+                          "min": lo if t in ("int", "float") else None, "max": hi,
+                          "choices": lo if t == "choice" else None,
+                          "default": presets[0]["args"].get(k) if presets else None, "help": h})
+        return {"pipeline": "training.snn", "presets": presets, "datasets": [], "archs": [], "flags": flags,
+                "prepare_datasets": [{"id": k, "label": v[0]} for k, v in DATASETS.items()]}
+
+    def build_args(self, body: dict) -> tuple[str, dict, list[str]]:
+        """(run name, config entry, --set overrides) from the form; validated with the pipeline's loader."""
+        name = str(body.get("name", ""))
+        if not NAME_RE.match(name):
+            raise HTTPException(422, "name: 2-41 characters, lowercase letters, digits and -")
+        conf = next((c for c in self.configs() if c["id"] == body.get("preset")), None)
+        if conf is None:
+            raise HTTPException(422, "preset: choose one of the configs in training/configs/")
+        values = body.get("args") or {}
+        if not isinstance(values, dict):
+            raise HTTPException(422, "args: expected an object")
+        overrides = []
+        for key, v in values.items():
+            spec = FLAGS.get(key)
+            if spec is None:
+                raise HTTPException(422, f"{key}: not a key the form can change (edit the YAML file)")
+            t, lo, hi, _ = spec
+            if t == "choice":
+                if v not in lo:
+                    raise HTTPException(422, f"{key}: one of {lo}")
+            elif t == "bool":
+                if v not in (True, False, 0, 1):
+                    raise HTTPException(422, f"{key}: true or false")
+                v = bool(v)
+            elif t == "sessions":
+                v = [x.strip() for x in str(v).split(",") if x.strip()]
+                if not v or not all(SESSION_RE.match(x) for x in v):
+                    raise HTTPException(422, f"{key}: session numbers like 01,02,13")
+            elif t == "int":
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or int(v) != v or not lo <= v <= hi:
+                    raise HTTPException(422, f"{key}: integer {lo}..{hi}")
+                v = int(v)
+            else:
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
+                    raise HTTPException(422, f"{key}: number {lo}..{hi}")
+                v = float(v)
+            current = conf["args"].get(key)
+            if (v if t != "sessions" else ",".join(v)) == current:
+                continue                                  # unchanged: the config's own value
+            overrides.append(f"{key}={json.dumps(v)}")    # JSON is valid YAML
+        cli, conf_mod = pipeline(self._repo())
+        try:
+            cfg = cli.apply_overrides(conf_mod.load_config(self._repo() / conf["id"]), overrides)
+        except Exception as e:  # noqa: BLE001 - ConfigError and friends: show the loader's message
+            raise HTTPException(422, f"config: {e}")
+        conf = dict(conf, sessions=sorted(set(cfg.data.train) | set(cfg.data.val) | set(cfg.data.test)),
+                    data_root=cfg.data.root)
+        return name, conf, overrides
+
+    # ---------------------------------------------------------------- code and data
+    async def _workdir(self, c, ssh) -> str:
+        r = await self._run(ssh, f"mkdir -p {c.workdir}/data {c.workdir}/runs {c.workdir}/logs && cd {c.workdir} && pwd",
+                            "creating the work folder", timeout=30)
+        return r.out.strip().splitlines()[-1]
+
+    def _code_files(self) -> list[str]:
+        repo = self._repo()
+        r = subprocess.run(["git", "-C", str(repo), "ls-files", "-co", "--exclude-standard"], capture_output=True,
+                           text=True, timeout=60)
+        if r.returncode != 0:
+            raise HTTPException(500, "git ls-files failed: is the repository a git checkout?")
+        files = [f for f in r.stdout.splitlines() if f and (repo / f).is_file()]
+        wheel = Path(self.cfg.paths.riverops).expanduser() if self.cfg.paths.riverops else None
+        if not wheel or not wheel.is_file():
+            raise HTTPException(500, "the riverops wheel (paths.riverops, data/riverops-*.whl) is missing on the laptop")
+        if not wheel.is_relative_to(repo):
+            raise HTTPException(500, "the riverops wheel must be inside the repository (data/)")
+        return files + [str(wheel.relative_to(repo))]
+
+    async def _sync_code(self, ssh, home: str, log) -> None:
+        files = self._code_files()
+        r = await ssh.rsync(str(self._repo()) + "/", home + "/", files_from=files, timeout=900)
+        if not r.ok:
+            logger.warning("code sync failed: %s", r.err[-500:])
+            raise HTTPException(502, f"copying the code failed: {clean(r.err)[-200:] or reason(r.err)}")
+        log(f"code synced ({len(files)} files)")
+
+    def _sessions(self, which: list[str], data_root: str) -> list[str]:
+        root = self._repo() / data_root
+        out = []
+        for d in sorted(root.iterdir()) if root.is_dir() else []:
+            if d.is_dir() and SESSION_RE.match(d.name) and any(DATASETS[w][1](int(d.name)) for w in which):
+                out.append(d.name)
+        return out
+
     # ---------------------------------------------------------------- machines
     async def hosts(self) -> dict:
         out = []
@@ -212,185 +367,160 @@ class Training:
                 if not ok:
                     logger.warning("training machine %s not reachable: %s", c.id, err)
                 detail = f"reachable, {ms:.0f} ms" if ok else reason(err)
-                hit = (time.monotonic(), {"id": c.id, "label": c.label, "kind": c.kind, "ok": ok, "detail": detail})
+                hit = (time.monotonic(), {"id": c.id, "label": c.label, "ok": ok, "detail": detail})
                 self._health[c.id] = hit
             out.append(hit[1])
         return {"hosts": out}
 
     async def test(self, hid: str) -> dict:
-        """Connection, GPU, Python, torch/CUDA, riverops and work folder of one machine."""
+        """Connection, work folder, GPU, uv, code, training environment (torch + riverops) and data."""
         c, ssh = self._host(hid)
         ok, ms, err = await ssh.ping()
         if not ok:
             logger.warning("test of %s: %s", c.id, err)
             return {"ok": False, "steps": [{"name": "SSH login", "ok": False, "detail": reason(err)}]}
-        code = ("import json,sys\nr={}\ntry:\n import torch; r['torch']=torch.__version__; r['cuda']=torch.cuda.is_available(); "
-                "r['gpu']=torch.cuda.get_device_name(0) if r['cuda'] else None\nexcept Exception as e: r['torch']=None; r['err']=type(e).__name__\n"
+        code = ("import json\nr={}\ntry:\n import torch; r['torch']=torch.__version__; r['cuda']=torch.cuda.is_available(); "
+                "r['gpu']=torch.cuda.get_device_name(0) if r['cuda'] else None\nexcept Exception as e: r['torch']=None\n"
                 "try:\n import riverops; r['riverops']=True\nexcept Exception: r['riverops']=False\nprint(json.dumps(r))")
         b64 = base64.b64encode(code.encode()).decode()
+        uv = self.uv(c)
         cmd = (f"mkdir -p {c.workdir} && cd {c.workdir} && echo WORKDIR_OK; "
                f"(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | head -n 4); "
-               f"{c.python} -c {q(f'import base64;exec(base64.b64decode({b64!r}))')} 2>/dev/null || echo PYTHON_FAIL; "
-               f"[ -d riverops ] && echo RIVEROPS_DIR; [ -f train_snn_v9.py ] && echo SCRIPT_OK; "
-               f"echo DATA_N=$(ls data/*.zip 2>/dev/null | wc -l); "
-               + ("command -v sbatch >/dev/null && echo SLURM_OK" if c.kind == "slurm" else "true"))
-        r = await ssh.run(cmd, timeout=90)
+               f"UV={uv}; [ -x \"$UV\" ] && echo UV_OK; [ -f training/snn/__main__.py ] && echo CODE_OK; "
+               f"[ -x \"$UV\" ] && [ -f pyproject.toml ] && \"$UV\" run --group train --no-sync python -c "
+               f"{q(f'import base64;exec(base64.b64decode({b64!r}))')} 2>/dev/null; "
+               f"echo SESSIONS=$(ls -d data/motion_buddy_dataset/[0-9][0-9] 2>/dev/null | wc -l)")
+        r = await ssh.run(cmd, timeout=120)
         out = r.out
         py = next((json.loads(ln) for ln in out.splitlines() if ln.startswith("{")), {})
         gpus = [ln.strip() for ln in out.splitlines() if re.match(r"^[A-Za-z].*,\s*\d+ MiB$", ln.strip())]
-        m = re.search(r"DATA_N=(\d+)", out)
-        n_data = int(m.group(1)) if m else 0
+        m = re.search(r"SESSIONS=(\d+)", out)
+        n_sessions = int(m.group(1)) if m else 0
         steps = [{"name": "SSH login", "ok": True, "detail": f"{ms:.0f} ms"},
                  {"name": "Work folder", "ok": "WORKDIR_OK" in out, "detail": "ready" if "WORKDIR_OK" in out else "cannot create it"},
                  {"name": "GPU", "ok": bool(gpus) or bool(py.get("cuda")), "detail": "; ".join(gpus) or py.get("gpu") or "no NVIDIA GPU found"},
-                 {"name": "Python + PyTorch", "ok": bool(py.get("torch")), "detail": f"torch {py['torch']}, CUDA {'yes' if py.get('cuda') else 'no'}" if py.get("torch") else "PyTorch not found for the configured Python"},
-                 {"name": "riverops", "ok": bool(py.get("riverops")),
-                  "detail": "found" if py.get("riverops") else ("uploaded, but it needs PyTorch" if "RIVEROPS_DIR" in out
-                                                                else "missing: run Prepare machine")},
-                 {"name": "Training script + data", "ok": "SCRIPT_OK" in out and n_data > 0,
-                  "detail": (f"script + {n_data} dataset(s)" if "SCRIPT_OK" in out and n_data else
-                             "script found, no dataset uploaded yet (Prepare machine)" if "SCRIPT_OK" in out else
-                             "missing: run Prepare machine")}]
-        if c.kind == "slurm":
-            steps.append({"name": "Slurm", "ok": "SLURM_OK" in out, "detail": "sbatch found" if "SLURM_OK" in out else "sbatch not found"})
+                 {"name": "uv", "ok": "UV_OK" in out, "detail": "found" if "UV_OK" in out else "missing: run Prepare machine"},
+                 {"name": "Code", "ok": "CODE_OK" in out, "detail": "training/snn found" if "CODE_OK" in out else "missing: run Prepare machine"},
+                 {"name": "PyTorch + riverops", "ok": bool(py.get("torch")) and bool(py.get("riverops")),
+                  "detail": (f"torch {py['torch']}, CUDA {'yes' if py.get('cuda') else 'no'}, riverops "
+                             f"{'found' if py.get('riverops') else 'missing'}") if py.get("torch")
+                  else "training environment not installed: run Prepare machine"},
+                 {"name": "Data", "ok": n_sessions > 0,
+                  "detail": f"{n_sessions} session folder(s)" if n_sessions else "no sessions uploaded yet (Prepare machine)"}]
         self._health.pop(c.id, None)
         return {"ok": all(s["ok"] for s in steps), "steps": steps}
 
     async def prepare(self, user: str, hid: str, datasets: list[str], log) -> dict:
-        """Copy the training script, riverops and the chosen datasets to the machine's work folder."""
+        """uv, code + riverops wheel, the training environment and the chosen dataset sessions."""
         c, ssh = self._host(hid)
-        paths = self.cfg.paths
-        script = project_file(paths, "train_snn_v9.py")
-        riverops = Path(paths.riverops).expanduser()
-        sources = {"organisers": (Path(paths.organisers_zip).expanduser(), "motion_buddy_full.zip"),
-                   "own": (Path(paths.share).expanduser() / "own_gestures_s20-30.zip", "own_gestures_s20-30.zip")}
-        bad = [d for d in datasets if d not in sources]
+        bad = [d for d in datasets if d not in DATASETS]
         if bad:
             raise HTTPException(422, f"unknown datasets {bad}")
-        for f in [script, riverops] + [sources[d][0] for d in datasets]:
-            if not f.exists():
-                raise HTTPException(500, f"missing on the laptop: {f.name}")
-        home = (await self._run(ssh, f"mkdir -p {c.workdir}/data {c.workdir}/logs {c.workdir}/runs && cd {c.workdir} && pwd",
-                                "creating the work folder", timeout=30)).out.strip().splitlines()[-1]
+        repo = self._repo()
+        home = await self._workdir(c, ssh)
         log("work folder ready")
-        for local, remote in ((script, "train_snn_v9.py"), (riverops, "riverops")):
-            res = await ssh.scp(str(local), f"{home}/{remote}", download=False, timeout=300)
-            if not res.ok:
-                logger.warning("upload of %s failed: %s", remote, res.err[-500:])
-                raise HTTPException(502, f"upload of {remote} failed: {reason(res.err)}")
-            log(f"uploaded {remote}")
-        for d in datasets:
-            local, name = sources[d]
-            log(f"uploading {name} ({local.stat().st_size / 1e6:.0f} MB): this can take a while")
-            res = await ssh.scp(str(local), f"{home}/data/{name}", download=False, timeout=6 * 3600)
-            if not res.ok:
-                logger.warning("upload of %s failed: %s", name, res.err[-500:])
-                raise HTTPException(502, f"upload of {name} failed: {reason(res.err)}")
-            log(f"uploaded data/{name}")
-        r = await ssh.run(f"cd {c.workdir} && {c.python} -c 'import pydantic' 2>/dev/null || "
-                          f"{c.python} -m pip install --user -q pydantic 2>&1 | tail -n 2", timeout=300)
-        log("checked Python packages" + ("" if r.ok else f": {clean(r.out + r.err)[-200:]}"))
-        self.audit.log(user, "train.prepare", {"machine": c.id, "datasets": datasets})
-        return {"machine": c.id}
-
-    def options(self) -> dict:
-        return {"datasets": [{"id": k, "label": v["label"]} for k, v in DATASETS.items()],
-                "archs": [{"id": k, "label": v} for k, v in ARCHS.items()], "presets": PRESETS,
-                "flags": [{"key": k, "type": t, "min": lo if t != "choice" else None, "max": hi,
-                           "choices": lo if t == "choice" else None, "default": d, "help": h}
-                          for k, (t, lo, hi, d, h) in FLAGS.items()]}
-
-    def build_args(self, body: dict) -> tuple[str, list[str]]:
-        name = str(body.get("name", ""))
-        if not NAME_RE.match(name):
-            raise HTTPException(422, "name: 2-41 characters, lowercase letters, digits and -")
-        ds = DATASETS.get(body.get("dataset"))
-        if ds is None:
-            raise HTTPException(422, f"dataset must be one of {sorted(DATASETS)}")
-        arch = body.get("arch")
-        if arch not in ARCHS:
-            raise HTTPException(422, f"arch must be one of {sorted(ARCHS)}")
-        args = list(ds["args"]) + ["--arch", arch]
-        values = dict(next((p["args"] for p in PRESETS if p["id"] == body.get("preset")), {}))
-        user_args = body.get("args") or {}
-        if not isinstance(user_args, dict):
-            raise HTTPException(422, "args: expected an object")
-        values.update(user_args)
-        for key, v in values.items():
-            spec = FLAGS.get(key)
-            if spec is None:
-                raise HTTPException(422, f"flag --{key} is not allowed")
-            t, lo, hi, _, _ = spec
-            if t == "choice":
-                if v not in lo:
-                    raise HTTPException(422, f"--{key} must be one of {lo}")
-                sval = v
-            elif t == "int":
-                if isinstance(v, bool) or not isinstance(v, (int, float)) or int(v) != v or not lo <= v <= hi:
-                    raise HTTPException(422, f"--{key}: integer {lo}..{hi}")
-                sval = str(int(v))
-            else:
-                if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
-                    raise HTTPException(422, f"--{key}: number {lo}..{hi}")
-                sval = repr(float(v))
-            args += [f"--{key}", sval]
-        return name, args
+        if not c.uv and not (await ssh.run('command -v uv >/dev/null || [ -x "$HOME/.local/bin/uv" ]', timeout=20)).ok:
+            local = shutil.which("uv")
+            if not local:
+                raise HTTPException(500, "uv is not installed on this laptop (needed to copy it to the machine)")
+            await self._run(ssh, "mkdir -p $HOME/.local/bin", "creating ~/.local/bin", timeout=20)
+            r = await ssh.rsync(local, ".local/bin/uv", timeout=300)
+            if not r.ok:
+                raise HTTPException(502, f"copying uv failed: {reason(r.err)}")
+            log("copied uv to ~/.local/bin/uv")
+        await self._sync_code(ssh, home, log)
+        log("installing the training environment (uv sync --group train; the first time downloads torch, ~3 GB)")
+        r = await ssh.run(f"cd {q(home)} && UV={self.uv(c)} && \"$UV\" sync --group train --quiet 2>&1 | tail -n 5 && "
+                          "\"$UV\" run --group train --no-sync python -c "
+                          + q("import torch, riverops; print('torch', torch.__version__, '| CUDA', torch.cuda.is_available())"),
+                          timeout=3600)
+        log(clean(r.out + r.err)[-600:])
+        if not r.ok:
+            raise HTTPException(502, "installing the training environment failed: " + clean(r.err or r.out)[-300:])
+        data_root = (next((x for x in self.configs() if x["id"] == DEFAULT_CONFIG), None) or {}).get("data_root") \
+            or "data/motion_buddy_dataset"
+        sessions = self._sessions(datasets, data_root)
+        if datasets and not sessions:
+            log(f"no matching session folders in {data_root} on this laptop")
+        if sessions:
+            log(f"uploading {len(sessions)} session folder(s) of {data_root}: {', '.join(sessions)} (only changed files move)")
+            r = await ssh.rsync(str(repo / data_root) + "/", f"{home}/{data_root}/", files_from=sessions,
+                                extra=["-r"], timeout=6 * 3600)
+            if not r.ok:
+                logger.warning("data upload failed: %s", r.err[-500:])
+                raise HTTPException(502, f"uploading the data failed: {clean(r.err)[-200:] or reason(r.err)}")
+            log("data uploaded")
+        self.audit.log(user, "train.prepare", {"machine": c.id, "datasets": datasets, "sessions": sessions})
+        return {"machine": c.id, "sessions": sessions}
 
     # ---------------------------------------------------------------- jobs
+    async def _local_check(self, conf: dict, overrides: list[str]) -> str:
+        """`python -m training.snn check`: the network, its FPGA memory estimate and the config's validity."""
+        args = [sys.executable, "-m", "training.snn", "check", "--config", conf["id"]]
+        for o in overrides:
+            args += ["--set", o]
+        r = await run_local(args, timeout=120, cwd=str(self._repo()))
+        if not r.ok:
+            raise HTTPException(422, "config check failed: " + r.out.strip()[-600:])
+        return r.out
+
     async def submit(self, user: str, body: dict) -> dict:
         c, ssh = self._host(body.get("host"))
-        name, args = self.build_args(body)
+        name, conf, overrides = self.build_args(body)
         dry = bool(body.get("dry_run", True))
-        if c.kind == "slurm":
-            cmd = f"cd {c.workdir} && sbatch {'--test-only ' if dry else '--parsable '}--job-name={q(name)} {q(c.slurm_script)} {q(*args)}"
-            shown = f"sbatch --job-name={name} {c.slurm_script} " + " ".join(args)
-        else:
-            run = f"{name}-$(date +%Y%m%d-%H%M%S)"
-            train = f"{c.python} -u train_snn_v9.py --out runs/$n {q(*args)}"
-            shown = f"{c.python} train_snn_v9.py --out runs/{name}-<time> " + " ".join(args)
-            if dry:     # check everything the run needs, start nothing; list what is missing
-                need_data = q(next(a for a in args if a.startswith("data/")))
-                cmd = (f"cd {c.workdir} 2>/dev/null || {{ echo 'MISSING work folder'; exit 0; }}; "
-                       f"[ -f train_snn_v9.py ] || echo 'MISSING training script'; [ -d riverops ] || echo 'MISSING riverops'; "
-                       f"[ -f {need_data} ] || echo 'MISSING dataset {need_data}'; "
-                       f"{c.python} -c 'import torch' 2>/dev/null || echo 'MISSING PyTorch for {c.python}'; "
-                       f"{c.python} -c 'import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)' 2>/dev/null "
-                       f"|| echo 'MISSING a CUDA GPU'; echo CHECKED")
-            else:
-                cmd = (f"cd {c.workdir} && mkdir -p logs runs && n={run} && "
-                       f"setsid nohup {train} > logs/$n.out 2>&1 < /dev/null & pid=$! && "
-                       f"echo \"$pid $n\" >> {DIRECT_JOBS} && echo \"$pid\"")
-        if not dry:
-            now = time.time()
-            while self.submits and now - self.submits[0] > 3600:
-                self.submits.popleft()
-            if len(self.submits) >= c.max_submits_per_hour:
-                raise HTTPException(429, f"at most {c.max_submits_per_hour} submissions per hour")
-            need(body.get("confirm", False), f"Start '{name}' on {c.label}? It uses the machine's GPU until it "
-                                             f"finishes.\n{shown}")
-        r = await self._run(ssh, cmd, "starting the run" if c.kind == "direct" else "sbatch", timeout=60)
-        text = clean((r.out + r.err).strip())
-        if c.kind == "direct" and dry:
+        sets = " ".join(f"--set {q(o)}" for o in overrides)
+        train = (f"\"$UV\" run --group train python -m training.snn train --config {q(conf['id'])} "
+                 f"--run-dir runs/$n {sets}").strip()
+        shown = (f"uv run --group train python -m training.snn train --config {conf['id']} --run-dir runs/{name}-<time> "
+                 + " ".join(f"--set {o}" for o in overrides)).strip()
+        report = await self._local_check(conf, overrides)
+        if dry:     # check everything the run needs, start nothing; list what is missing
+            data_root = conf["data_root"]
+            missing_sessions = " ".join(f"[ -d {q(data_root + '/' + s)} ] || echo 'MISSING session {s}';"
+                                        for s in conf["sessions"])
+            cmd = (f"cd {c.workdir} 2>/dev/null || {{ echo 'MISSING work folder'; exit 0; }}; UV={self.uv(c)}; "
+                   f"[ -x \"$UV\" ] || echo 'MISSING uv'; [ -f pyproject.toml ] || echo 'MISSING code'; "
+                   f"{missing_sessions} "
+                   f"[ -x \"$UV\" ] && \"$UV\" run --group train --no-sync python -c 'import torch, riverops' 2>/dev/null "
+                   f"|| echo 'MISSING the training environment'; "
+                   f"[ -x \"$UV\" ] && \"$UV\" run --group train --no-sync python -c "
+                   f"'import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)' 2>/dev/null || echo 'MISSING a CUDA GPU'; "
+                   "echo CHECKED")
+            r = await self._run(ssh, cmd, "checking the machine", timeout=90)
             missing = [ln[8:] for ln in r.out.splitlines() if ln.startswith("MISSING ")]
             if missing:
                 raise HTTPException(409, "the machine is not ready: missing " + ", ".join(missing)
-                                    + ". Use Prepare machine (and install PyTorch with CUDA if it is missing).")
-            text = f"ready: {name} would start now"
-        job = None if dry else (re.search(r"(\d+)", r.out) or [None, None])[1]
-        if not dry:
-            self.submits.append(time.time())
-        self.audit.log(user, "train.submit", {"machine": c.id, "name": name, "dry_run": dry, "args": args}, job or text[-200:])
-        return {"job_id": job, "command": shown, "dry_run": dry, "output": text[-1000:]}
+                                    + ". Use Prepare machine (with the datasets this config uses).")
+            self.audit.log(user, "train.submit", {"machine": c.id, "name": name, "dry_run": True, "config": conf["id"],
+                                                  "overrides": overrides}, "ready")
+            return {"job_id": None, "command": shown + "\n\n" + report.strip(), "dry_run": True,
+                    "output": f"ready: {name} would start now"}
+        now = time.time()
+        while self.submits and now - self.submits[0] > 3600:
+            self.submits.popleft()
+        if len(self.submits) >= c.max_submits_per_hour:
+            raise HTTPException(429, f"at most {c.max_submits_per_hour} submissions per hour")
+        need(body.get("confirm", False), f"Start '{name}' on {c.label}? It uses the machine's GPU until it finishes.\n{shown}")
+        home = await self._workdir(c, ssh)
+        await self._sync_code(ssh, home, lambda _: None)
+        # Plain ';' before the '&': with 'a && b && c &' the whole chain would run in a background
+        # subshell, and n, UV and the cd would not exist for the lines after it.
+        cmd = (f"cd {q(home)} || exit 1; mkdir -p logs runs; UV={self.uv(c)}; n={q(name)}-$(date +%Y%m%d-%H%M%S); "
+               f"mkdir -p runs/$n; setsid nohup {train} > logs/$n.out 2>&1 < /dev/null & pid=$!; "
+               f"echo \"$pid $n\" >> {JOBS_FILE}; echo \"$pid\"")
+        r = await self._run(ssh, cmd, "starting the run", timeout=60)
+        job = (re.search(r"(\d+)", r.out) or [None, None])[1]
+        self.submits.append(time.time())
+        self.audit.log(user, "train.submit", {"machine": c.id, "name": name, "dry_run": False, "config": conf["id"],
+                                              "overrides": overrides}, job)
+        return {"job_id": job, "command": shown, "dry_run": False, "output": clean(r.out + r.err)[-1000:]}
 
     async def jobs(self, hid: str | None) -> dict:
         c, ssh = self._host(hid)
-        if c.kind == "slurm":
-            r = await self._run(ssh, 'squeue -u "$USER" -h -o "%i|%j|%T|%M|%N|%r"', "listing the jobs", timeout=20)
-        else:
-            r = await self._run(ssh, f"cd {c.workdir} 2>/dev/null && [ -f {DIRECT_JOBS} ] && tail -n 50 {DIRECT_JOBS} | "
-                                     "while read pid n; do kill -0 \"$pid\" 2>/dev/null && "
-                                     "echo \"$pid|$n|RUNNING|$(ps -o etime= -p $pid | tr -d ' ')|this machine|\"; done; true",
-                                "listing the runs", timeout=20)
+        r = await self._run(ssh, f"cd {c.workdir} 2>/dev/null && [ -f {JOBS_FILE} ] && tail -n 50 {JOBS_FILE} | "
+                                 "while read pid n; do kill -0 \"$pid\" 2>/dev/null && "
+                                 "echo \"$pid|$n|RUNNING|$(ps -o etime= -p $pid | tr -d ' ')|this machine|\"; done; true",
+                            "listing the runs", timeout=20)
         jobs = []
         for line in r.out.splitlines():
             p = line.split("|")
@@ -406,7 +536,7 @@ class Training:
         if job not in mine:
             raise HTTPException(404, "not one of your running jobs")
         need(confirm, f"Cancel job {job} ({mine[job]['name']}, {mine[job]['state']} for {mine[job]['time']})?")
-        cmd = f"scancel {q(job)}" if c.kind == "slurm" else f"kill -TERM -- -{int(job)} 2>/dev/null || kill -TERM {int(job)}"
+        cmd = f"kill -TERM -- -{int(job)} 2>/dev/null || kill -TERM {int(job)}"    # setsid: the run's process group
         await self._run(ssh, cmd, "cancelling the job", timeout=20)
         self.audit.log(user, "train.cancel", {"machine": c.id, "job": job, "name": mine[job]["name"]})
         return {"ok": True}
@@ -416,10 +546,7 @@ class Training:
         if not JOB_RE.match(str(job)):
             raise HTTPException(422, "job id")
         lines = max(10, min(int(lines), 2000))
-        if c.kind == "slurm":
-            find = f"f=$(ls -t logs/*-{job}.out 2>/dev/null | head -n 1)"
-        else:
-            find = f"f=logs/$(awk '$1 == \"{int(job)}\" {{print $2}}' {DIRECT_JOBS} 2>/dev/null | tail -n 1).out"
+        find = f"f=logs/$(awk '$1 == \"{int(job)}\" {{print $2}}' {JOBS_FILE} 2>/dev/null | tail -n 1).out"
         r = await self._run(ssh, f'cd {c.workdir} && {find}; [ -f "$f" ] && tail -n {lines} "$f" || echo "no log for job {job} yet"',
                             "reading the log", timeout=20)
         return {"lines": r.out.splitlines()}
@@ -440,21 +567,23 @@ class Training:
         return {"runs": runs}
 
     async def fetch(self, user: str, hid: str | None, run: str, log) -> dict:
+        """Copy runs/<run>/ (config, metrics, checkpoints, deploy/) to this laptop's runs/<run>/."""
         c, ssh = self._host(hid)
         if not RUN_RE.match(run or ""):
             raise HTTPException(422, "run name")
-        dest = Path(self.cfg.paths.models).expanduser() / "fetched" / run
+        if not self.cfg.paths.runs:
+            raise HTTPException(503, "no runs folder configured (paths.runs)")
+        dest = Path(self.cfg.paths.runs).expanduser() / run
+        home = await self._workdir(c, ssh)
+        r = await ssh.run(f"[ -f {q(home + '/runs/' + run + '/metrics.json')} ]", timeout=20)
+        if not r.ok:
+            raise HTTPException(404, f"run {run} has no results yet")
         dest.mkdir(parents=True, exist_ok=True)
-        r = await ssh.run(f"cd {c.workdir}/runs/{q(run)} && ls weights_q*.txt model.json metrics.json 2>/dev/null", timeout=20)
-        files = [f for f in r.out.split() if re.fullmatch(r"(weights_q\w+\.txt|model\.json|metrics\.json)", f)]
-        if not files:
-            raise HTTPException(404, f"run {run} has no weights / metrics yet")
-        home = (await self._run(ssh, f"cd {c.workdir} && pwd", "resolving the work folder", timeout=15)).out.strip()
-        for f in files:
-            res = await ssh.scp(f"{home}/runs/{run}/{f}", str(dest / f), download=True, timeout=300)
-            if not res.ok:
-                logger.warning("copy of %s failed: %s", f, res.err[-500:])
-                raise HTTPException(502, f"copy of {f} failed: {clean(res.err)[-200:] or reason(res.err)}")
-            log(f"copied {f}")
-        self.audit.log(user, "train.fetch", {"machine": c.id, "run": run, "files": files})
-        return {"dir": str(dest), "files": files}
+        r = await ssh.rsync(f"{home}/runs/{run}/", str(dest) + "/", download=True, timeout=1800)
+        if not r.ok:
+            logger.warning("fetch of %s failed: %s", run, r.err[-500:])
+            raise HTTPException(502, f"copying the run failed: {clean(r.err)[-200:] or reason(r.err)}")
+        files = sorted(str(p.relative_to(dest)) for p in dest.rglob("*") if p.is_file())
+        log(f"copied {len(files)} files to runs/{run}/")
+        self.audit.log(user, "train.fetch", {"machine": c.id, "run": run, "files": len(files)})
+        return {"run": run, "files": len(files)}

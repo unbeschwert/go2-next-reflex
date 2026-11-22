@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import re
 import socket
@@ -12,6 +13,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from . import models as M
+from . import snnruns
 from .config import project_file
 from .errors import need
 from .sshrun import SSH, q
@@ -24,6 +26,12 @@ INFERENCE = {"start": "start", "start-headless": "start --headless", "robot": "r
              "stop": "stop"}
 HELPER_FILES = ["live_gesture_bridge.py", "bridge_settings.py", "lidar_follow.py", "robot_link.sh"]
 BACKUP_DIR = "/root/dashboard_backups"
+FIRMWARE_DIR = "/usr/lib/firmware/xilinx/spleat"
+# a board setup: firmware + configs + weights (firmware_performance_testing/switch_setup.sh, board/install_setup.sh)
+SETUP_FILES = {"spleat.bit.bin": f"{FIRMWARE_DIR}/spleat.bit.bin", "spleat.dtbo": f"{FIRMWARE_DIR}/spleat.dtbo",
+               "config.yaml": "/root/.config/spleat-server/config.yaml",
+               "metavision_camera.json": "/root/metavision_camera.json", "weights.txt": "/root/weights.txt",
+               "model_classes": "/root/model_classes"}
 
 
 def py_cmd(script: str, *args, env_script: str | None = None) -> str:
@@ -33,6 +41,11 @@ def py_cmd(script: str, *args, env_script: str | None = None) -> str:
     if env_script:
         return f"bash -c {q(f'source {q(env_script)} >/dev/null 2>&1 || exit 3; {run}')}"
     return run
+
+
+def md5_lines(text: str) -> dict[str, str]:
+    """md5sum output -> {file name: md5}."""
+    return {Path(m.group(2)).name: m.group(1) for m in re.finditer(r"^([0-9a-f]{32})\s+\*?(\S+)\s*$", text, re.M)}
 
 
 def parse_lock(raw: str | None) -> dict | None:
@@ -53,6 +66,7 @@ class Board:
         self.cfg, self.audit, self.broker = cfg, audit, broker
         self.ssh = SSH(f"{b.user}@{b.host}", b.control_path, b.ssh_port, b.connect_timeout_s)
         self.models_dir = Path(cfg.paths.models).expanduser()
+        self.runs_dir = Path(cfg.paths.runs).expanduser() if cfg.paths.runs else None
         self._status: dict | None = None
         self._status_t = 0.0
         self._lock = asyncio.Lock()
@@ -98,15 +112,28 @@ class Board:
             out.update(model=None, autostart=None)
             return out
         md = st.get("model") or {}
-        arch = M.COUNTS.get(md.get("values"), (None, None))
-        name = M.name_for_md5(self.models_dir, md.get("md5", "")) if md.get("md5") else None
+        known = M.by_md5(self.models_dir, md["md5"], self.runs_dir) if md.get("md5") else None
+        if known and known.get("kind") == "setup":            # a run of our pipeline: its files know the network
+            arch = (known["arch"], known["input"])
+        else:
+            arch = M.COUNTS.get(md.get("values"), (None, None))
+        name = known["name"] if known else None
         sc = st.get("server_config") or {}
         classes = st.get("model_classes")
-        bits = "16-bit" if (name and "q16" in name) or arch[0] == "best80" else "8-bit"
+        if known and known.get("kind") == "setup":
+            bits = f"{known['formats']['weights']} weights"
+        else:
+            bits = "16-bit" if (name and "q16" in name) or arch[0] == "best80" else "8-bit"
         label = (f"{'Own gestures' if classes == 'own' else 'Durance AI team gestures'} · {arch[0] or 'unknown network'}"
                  + (f" ({sc.get('input')}×{sc.get('input')}, {bits})" if sc.get("input") else ""))
         out["model"] = {"md5": md.get("md5", "")[:8], "md5_full": md.get("md5"), "name": name, "label": label,
-                        "classes": classes, "input": sc.get("input"), "arch": arch[0], "values": md.get("values")}
+                        "classes": classes, "input": sc.get("input"), "arch": arch[0], "values": md.get("values"),
+                        "kind": known.get("kind") if known else None}
+        fw_md5 = (st.get("firmware") or {}).get("bit_md5")
+        fw = snnruns.find_firmware(self.runs_dir, fw_md5)
+        out["firmware"] = {"md5": (fw_md5 or "")[:8], "known": fw is not None,
+                           "label": fw["label"] if fw else ("not built from a run under runs/" if fw_md5 else None),
+                           "weights": fw["weights"] if fw else None, "potentials": fw["potentials"] if fw else None}
         a = st.get("autostart") or {}
         conf = parse_conf(a.get("conf") or "")
         out["autostart"] = {"installed": a.get("installed", False), "enabled": a.get("enabled") == "enabled",
@@ -125,6 +152,21 @@ class Board:
             w.append(f"weights are a {arch[0]} ({arch[1]}x{arch[1]}) network but the server expects {sc['input']}x{sc['input']} input")
         if md.get("values") and not arch[0]:
             w.append(f"weights.txt has {md.get('values')} values: unknown architecture")
+        if known and known.get("kind") == "setup" and fw_md5:
+            if fw is None:
+                w.append(f"weights are the run {known['name']}, but the firmware is not one built for it under runs/: "
+                         "if they don't match, the outputs are meaningless")
+            elif fw["graph"] != known["graph"] or fw["weights"] != known["formats"]["weights"] \
+                    or fw["potentials"] != known["formats"]["potentials"]:
+                w.append(f"weights are the run {known['name']} ({known['formats']['weights']}), but the firmware is "
+                         f"{fw['label']} ({fw['weights']}, another network or format): the outputs are meaningless")
+        elif fw and md.get("values") and fw["network"]:
+            n = fw["network"]
+            if md["values"] != sum(ci * co * k * k + co + 2 for ci, co, k, _, _ in n["layers"]):
+                w.append(f"weights.txt has {md['values']} values, but the firmware {fw['label']} is for another network")
+        out_shape = sc.get("output_shape")
+        if known and known.get("network") and out_shape and out_shape != known["network"]["output"]:
+            w.append(f"server config outputs {out_shape} but the network outputs {known['network']['output']}")
         h = st.get("helpers") or {}
         if not h.get("robot_link"):
             w.append("/root/robot_link.sh missing: robot mode cannot reach the Go2 (install board software)")
@@ -243,6 +285,8 @@ class Board:
     async def deploy(self, user: str, model: dict, classes: str, log) -> dict:
         if classes not in ("own", "dataset"):
             raise HTTPException(422, "classes must be own or dataset")
+        if model.get("kind") == "setup":
+            raise HTTPException(500, "a run installs a full setup: use deploy_setup")
         st = await self.raw_status(0)
         cur = st.get("model") or {}
         cur_arch = M.COUNTS.get(cur.get("values"), (None, None))[0]
@@ -250,6 +294,13 @@ class Board:
             raise HTTPException(409, f"the board's firmware runs a {cur_arch or 'unknown'} network ({cur.get('values')} values); "
                                 f"this model is {model['arch']} ({model['values']} values). Weights must match the firmware: "
                                 "switch the firmware setup first.")
+        # Same value count is not enough: the firmware also fixes the weight format (e.g. Q1.7 vs Q2.6).
+        fw = snnruns.find_firmware(self.runs_dir, (st.get("firmware") or {}).get("bit_md5"))
+        want = (model.get("formats") or {}).get("weights")
+        if fw and want and fw["weights"] != want:
+            raise HTTPException(409, f"the board's firmware ({fw['label']}) reads weights as {fw['weights']}, but "
+                                f"{model['name']} is {want}: the network would compute garbage. Install a setup with "
+                                "matching firmware first.")
         path = self.models_dir / model["path"]
         data = path.read_bytes()
         prev_mode = st.get("mode")
@@ -262,18 +313,89 @@ class Board:
         self.audit.log(user, "board.deploy", {"model": model["name"], "md5": model["md5"], "classes": classes, "backup": ts})
         return {"md5": model["md5"], "backup": ts}
 
+    async def deploy_setup(self, user: str, model: dict, log) -> dict:
+        """Install a run of our pipeline as a full board setup: its firmware, server config, camera config
+        (downsampling and frame rate; the board's sensor settings stay), weights and classes. The current
+        setup is backed up first (Restore puts it back); if the new one does not load, the backup is
+        reinstalled at once."""
+        if model.get("problems"):
+            raise HTTPException(409, f"{model['name']} cannot be installed: " + "; ".join(model["problems"]))
+        st = await self.raw_status(0)
+        if not st.get("ssh"):
+            raise HTTPException(503, f"board not available: {st.get('error')}")
+        files = snnruns.setup_files(model, st.get("camera_config"))
+        prev_mode = st.get("mode")
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        bak, stage = f"{BACKUP_DIR}/setup_{ts}", f"{BACKUP_DIR}/stage_{ts}"
+        log(f"backing up the current setup to {bak}/")
+        cp = "; ".join(f"cp {q(src)} {q(bak + '/' + name)}" for name, src in SETUP_FILES.items() if name != "model_classes")
+        (await self.ssh.run(f"set -e; mkdir -p {q(bak)}; {cp}; (cat /root/model_classes 2>/dev/null || echo dataset) "
+                            f"> {q(bak + '/model_classes')}; cd {q(bak)} && md5sum * > MD5SUMS", timeout=60)).check("backup")
+        try:
+            log(f"uploading {sum(map(len, files.values())) / 1e6:.1f} MB: firmware {model['firmware']['label']}, "
+                f"configs, weights")
+            (await self.ssh.run(f"mkdir -p {q(stage)}", timeout=10)).check("staging folder")
+            for name, data in files.items():
+                (await self.ssh.put(data, f"{stage}/{name}", timeout=180)).check(f"upload {name}")
+            want = {name: hashlib.md5(data).hexdigest() for name, data in files.items()}
+            r = (await self.ssh.run(f"cd {q(stage)} && md5sum {q(*files)}", timeout=30)).check("checking the upload")
+            if md5_lines(r.out) != want:
+                raise HTTPException(502, "uploaded files are corrupt (md5 mismatch); nothing changed")
+            log("md5 verified; stopping inference, loading the firmware, restarting the FPGA server")
+            r = await self._install_setup_dir(stage, log)
+            installed = md5_lines(r.out)                  # board file names are the setup names
+            bad = [name for name in SETUP_FILES if installed.get(name) != want[name]]
+            if not r.ok or bad or "SETUP INSTALLED" not in r.out:
+                why = (r.err.strip() or r.out.strip())[-300:] if not r.ok else f"the board reports other files: {bad}"
+                log("the new setup did not install cleanly: putting the previous setup back")
+                back = await self._install_setup_dir(bak, log)
+                raise HTTPException(502, "installing the setup failed: " + why
+                                    + ("; the previous setup is back" if back.ok else
+                                       "; putting the previous setup back failed too: use Restore"))
+            (await self.ssh.run(f"echo setup_{ts} > {BACKUP_DIR}/LAST", timeout=10)).check("backup marker")
+        finally:
+            await self.ssh.run(f"rm -rf {q(stage)}", timeout=20)
+        await self._restart_inference(prev_mode, log)
+        self.invalidate()
+        self.audit.log(user, "board.deploy_setup", {"model": model["name"], "md5": model["md5"],
+                                                    "firmware": model["firmware"]["label"], "backup": ts})
+        return {"md5": model["md5"], "backup": f"setup_{ts}"}
+
+    async def _install_setup_dir(self, folder: str, log):
+        r = await self.ssh.run(f"bash -s -- {q(folder)}", input=(BOARD_FILES / "install_setup.sh").read_bytes(), timeout=240)
+        log((r.out.strip() + "\n" + r.err.strip()).strip()[-1500:])
+        return r
+
+    async def _restart_inference(self, prev_mode: str | None, log) -> None:
+        if prev_mode in ("test", "robot", "robot-dry", "camera-only"):
+            # never re-enter robot mode by itself: the operator does that explicitly
+            log("restarting inference in test mode (RViz)" + (" - robot mode must be started again by hand"
+                                                              if prev_mode.startswith("robot") else ""))
+            r = await self.ssh.run("bash /root/inference.sh start --headless", timeout=150)
+            log(r.out.strip()[-1500:])
+
     async def restore(self, user: str, log) -> dict:
         r = await self.ssh.run(f"cat {BACKUP_DIR}/LAST", timeout=8)
         if not r.ok or not r.out.strip():
             raise HTTPException(409, "no dashboard backup on the board")
         ts = r.out.strip()
+        if re.fullmatch(r"setup_\d{8}-\d{6}", ts):            # a full setup (firmware, configs, weights)
+            folder = f"{BACKUP_DIR}/{ts}"
+            (await self.ssh.run(f"cd {q(folder)} && md5sum -c --quiet MD5SUMS", timeout=60)).check("checking the backup")
+            st = await self.raw_status(0)
+            log(f"putting back the setup from {folder}/")
+            res = await self._install_setup_dir(folder, log)
+            res.check("restoring the setup")
+            await self._restart_inference(st.get("mode"), log)
+            self.invalidate()
+            self.audit.log(user, "board.restore_setup", {"backup": ts})
+            return {"backup": ts}
         if not re.fullmatch(r"\d{8}-\d{6}", ts):
             raise HTTPException(500, "backup marker is corrupt")
         r = await self.ssh.run(f"cat {BACKUP_DIR}/weights_{ts}.txt", timeout=60)
         r.check("reading the backup")
         data = r.out.encode()
         cls = (await self.ssh.run(f"cat {BACKUP_DIR}/model_classes_{ts} 2>/dev/null || echo dataset", timeout=8)).out.strip()
-        import hashlib
         md5 = hashlib.md5(data).hexdigest()
         st = await self.raw_status(0)
         await self._install_weights(data, md5, cls if cls in ("own", "dataset") else "dataset", st.get("mode"), log)
@@ -296,12 +418,7 @@ class Board:
         r.check("installing the weights")
         if md5 not in r.out:
             raise HTTPException(502, "the board reports a different weights.txt after the restart")
-        if prev_mode in ("test", "robot", "robot-dry", "camera-only"):
-            # never re-enter robot mode by itself: the operator does that explicitly
-            log("restarting inference in test mode (RViz)" + (" - robot mode must be started again by hand"
-                                                              if prev_mode.startswith("robot") else ""))
-            r = await self.ssh.run("bash /root/inference.sh start --headless", timeout=150)
-            log(r.out.strip()[-1500:])
+        await self._restart_inference(prev_mode, log)
         self.invalidate()
 
     # ---------------------------------------------------------------- board software (helpers)

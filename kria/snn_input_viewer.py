@@ -5,7 +5,8 @@ Passively listens on the loopback interface to the TCP connection between the
 camera client (despot_send_and_forget) and the SPLEAT server (127.0.0.1:3333):
   * upstream:   input frames  {id, payload = float32[2][S][S]}  at 100 Hz (S = model input size,
                 detected from the payload: 80 or 40)
-  * downstream: model outputs {id, payload = float32[5], latency} at 100 Hz
+  * downstream: model outputs {id, payload = float32[5 x H x W], latency} at 100 Hz (H = W = 1 unless the
+                network has a spatial head; class_spikes sums the positions of each class)
 Nothing is modified - inference keeps running exactly as before.
 
     python3 /root/snn_input_viewer.py [port] [dataset|own]     ->  http://192.168.77.1:8080
@@ -37,6 +38,18 @@ frames = deque(maxlen=5)             # last 50 ms of input frames
 outs = deque(maxlen=400)             # (arrival time, spikes) of the latest model outputs
 stats = {"in": 0, "out": 0, "lat": 0, "t": time.time(), "in_hz": 0.0, "resync": 0}
 latest_jpeg = None
+
+
+def class_spikes(p, n_out):
+    """One output frame's payload (float32 per output neuron, classes x H x W, as spleat-server sends it) ->
+    1.0/0.0 per class: did any position of the class spike. A 1x1 output map is one value per class; a
+    spatial head (training/snn model.head, outputs.height/width > 1 in the server config) has H*W per class."""
+    n = len(p) // 4
+    if n == 0 or len(p) % 4 or n % n_out:
+        return None
+    v = struct.unpack("<%df" % n, p)
+    per = n // n_out
+    return [1.0 if any(x > 0 for x in v[i * per:(i + 1) * per]) else 0.0 for i in range(n_out)]
 
 
 def parse_payload(body):
@@ -99,12 +112,12 @@ def on_input(body):
 
 def on_output(body):
     p, _ = parse_payload(body)
-    if p is None or len(p) != 4 * N_OUT:
+    spikes = class_spikes(p, N_OUT) if p is not None else None
+    if spikes is None:
         return
-    sc = struct.unpack(f"<{N_OUT}f", p)
     j = body.find(b"\x67latency")
     with lock:
-        outs.append((time.time(), [1.0 if x > 0 else 0.0 for x in sc]))
+        outs.append((time.time(), spikes))
         stats["out"] += 1
         if j >= 0 and body[j + 8] == 0x19:
             stats["lat"] = struct.unpack(">H", body[j + 9:j + 11])[0]

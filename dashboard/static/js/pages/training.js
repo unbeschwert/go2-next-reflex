@@ -1,7 +1,9 @@
 // Training: tabs [Runs] [Jobs] [New run] [Machines]; machine status in the header.
-// Runs: sortable compact table + Fetch. Jobs: state dots, log drawer, cancel in "...".
-// New run: machine / preset / dataset / architecture / name; Advanced flags collapsed.
-// Machines: GPU machines / Slurm clusters added in the dashboard (components/machines.js).
+// Our pipeline (python -m training.snn): a run = a YAML config from training/configs/ + optional overrides.
+// Runs: sortable compact table + Fetch (to the laptop's runs/, deployable on the Board page).
+// Jobs: state dots, log drawer, cancel in "...".
+// New run: machine / config / name; the config's values for common keys collapsed below (changed = --set).
+// Machines: GPU servers reached over SSH, added in the dashboard (components/machines.js).
 
 import { api, detailKeys } from '../api.js';
 import {
@@ -17,9 +19,10 @@ const JOBS_MS = 10000;
 const HOSTS_MS = 30000;
 const LOG_MS = 5000;
 const FLAG_GROUPS = [
-  ['Training', (k) => ['epochs', 'batch-size', 'lr', 'weight-decay', 'ce-weight', 'seed'].includes(k) || k.startsWith('qat-')],
-  ['Neurons', (k) => ['learnable-leak', 'initial-tau', 'spike-reg'].includes(k)],
-  ['Augmentation', () => true],
+  ['Training', (k) => k === 'seed' || k.startsWith('train.') || k.startsWith('quant.')],
+  ['Data splits', (k) => k.startsWith('data.')],
+  ['Neurons', (k) => k.startsWith('model.')],
+  ['Augmentation (probability per clip)', () => true],
 ];
 
 function jobState(state) {
@@ -87,16 +90,16 @@ export async function mount(root, scope) {
       {
         key: 'name', label: 'Name', sort: strSort('name'),
         render: (r) => el('div', null, el('div', { class: 'cell-main', text: r.name || '?' }),
-          el('div', { class: 'cell-sub', text: [r.dataset, r.job ? `job ${r.job}` : null, fmt.isNum(r.val) ? `val ${fmt.accuracy(r.val)}` : null].filter(Boolean).join(' · ') })),
+          el('div', { class: 'cell-sub', text: [r.kind, r.deployable === false ? 'no deploy files yet' : null].filter(Boolean).join(' · ') })),
       },
-      { key: 'arch', label: 'Arch', sort: strSort('arch') },
+      { key: 'config', label: 'Config', sort: strSort('config') },
+      { key: 'val', label: 'Val', numeric: true, sort: numSort('val'), render: (r) => fmt.accuracy(r.val) },
       { key: 'test', label: 'Test', numeric: true, sort: numSort('test'), render: (r) => fmt.accuracy(r.test) },
-      { key: 'synops', label: 'SynOps', numeric: true, sort: numSort('synops'), render: (r) => fmt.si(r.synops) },
       { key: 'finished', label: 'Finished', sort: strSort('finished'), render: (r) => el('span', { class: 'muted', text: fmt.dateTime(r.finished) }) },
       {
         key: 'fetch', label: '', cls: 'actions',
         render: (r) => {
-          const b = btn('Fetch', { kind: 'ghost', size: 'sm', icon: 'download', tip: 'Copy the weights and metrics to this laptop (then deployable from Board > Models)' });
+          const b = btn('Fetch', { kind: 'ghost', size: 'sm', icon: 'download', tip: "Copy the run to this laptop's runs/ folder (then installable from Board > Models)" });
           b.addEventListener('click', () => fetchRun(r, b));
           return b;
         },
@@ -226,7 +229,7 @@ export async function mount(root, scope) {
   const presetSel = select([], {});
   const datasetSel = select([], {});
   const archSel = select([], {});
-  const nameInput = input({ maxLength: 80, placeholder: 'e.g. own-nb40-q8h-v2', attrs: { spellcheck: 'false' } });
+  const nameInput = input({ maxLength: 80, placeholder: 'e.g. v4-seed43', attrs: { spellcheck: 'false' } });
   const nameField = field('Name', nameInput);
   const datasetField = field('Dataset', datasetSel);
   const archField = field('Architecture', archSel);
@@ -237,7 +240,7 @@ export async function mount(root, scope) {
   resultStatus.hidden = true;
   const resultPre = el('pre', { class: 'logbox cmd-out', hidden: true, tabindex: '0', 'aria-label': 'Training command' });
   const flagsHost = el('div', { class: 'stack' });
-  const advanced = collapsible({ title: 'Advanced flags', key: 'training.advanced' }, flagsHost);
+  const advanced = collapsible({ title: 'Config values', key: 'training.advanced' }, flagsHost);
   const formBody = el('div', { class: 'stack' }, emptyState({ kind: 'loading', title: 'Loading training options…' }));
   work.new.content.append(card({ title: 'New training run' }, formBody));
 
@@ -294,9 +297,13 @@ export async function mount(root, scope) {
   function buildForm(opts) {
     options = opts;
     const presets = Array.isArray(opts.presets) ? opts.presets : [];
-    setOptions(presetSel, [{ value: '', label: 'No preset (defaults)' }, ...presets.map((p) => ({ value: String(p.id), label: p.label || String(p.id) }))]);
-    setOptions(datasetSel, (Array.isArray(opts.datasets) ? opts.datasets : []).map(optionOf));
-    setOptions(archSel, (Array.isArray(opts.archs) ? opts.archs : []).map(optionOf));
+    setOptions(presetSel, presets.map((p) => ({ value: String(p.id), label: p.label || String(p.id) })));
+    const datasets = Array.isArray(opts.datasets) ? opts.datasets : [];
+    const archs = Array.isArray(opts.archs) ? opts.archs : [];
+    setOptions(datasetSel, datasets.map(optionOf));
+    setOptions(archSel, archs.map(optionOf));
+    datasetField.hidden = !datasets.length; // our pipeline: the config sets the data and the network
+    archField.hidden = !archs.length;
     flagFields.clear();
     const flags = (Array.isArray(opts.flags) ? opts.flags : []).filter((f) => f && f.key);
     const grouped = new Map(FLAG_GROUPS.map(([g]) => [g, []]));
@@ -307,9 +314,9 @@ export async function mount(root, scope) {
     }
     flagsHost.replaceChildren(...Array.from(grouped).filter(([, list]) => list.length).map(([g, list]) => el('div', null,
       el('div', { class: 'flag-group-title', text: g }), el('div', { class: 'form-grid' }, ...list))));
-    setText(advanced.metaEl, `${flags.length} flags`);
+    setText(advanced.metaEl, `${flags.length} keys`);
     formBody.replaceChildren(
-      el('div', { class: 'form-grid' }, machineField, field('Preset', presetSel, { help: 'Fills the flags with a known recipe.' }), datasetField, archField, nameField),
+      el('div', { class: 'form-grid' }, machineField, field('Config', presetSel, { help: 'A YAML file in training/configs/ (network, data, splits, training). The values below start from it; every value you change is passed as --set section.key=value.' }), datasetField, archField, nameField),
       flags.length ? advanced : null,
       formError,
       el('div', { class: 'form-actions' }, submitBtn, dryRun.el),

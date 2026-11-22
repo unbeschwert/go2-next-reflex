@@ -62,7 +62,11 @@ class PathsCfg:
     laptop_env: str = str(REPO / "ros2" / "env.sh") if REPO else str(HOME / "go2-hackathon" / "laptop_ws" / "env.sh")
     board_link_env: str = (str(REPO / "ros2" / "env_board_link.sh") if REPO
                            else str(HOME / "go2-hackathon" / "laptop_ws" / "env_board_link.sh"))
-    riverops: str = str(HOME / "go2-hackathon" / "riverops-src" / "riverops")   # the riverops package (training)
+    # Our training pipeline (python -m training.snn, training/README.md): YAML configs, runs (laptop copies,
+    # the Board page deploys from them) and the proprietary riverops wheel copied to training machines.
+    training_configs: str = str(REPO / "training" / "configs") if REPO else ""
+    runs: str = str(REPO / "runs") if REPO else str(HOME / "go2-hackathon" / "runs")
+    riverops: str = str(REPO / "data" / "riverops-0.2.0-py3-none-any.whl") if REPO else ""
     recorder_python: str = str(HOME / ".local" / "share" / "uv" / "tools" / "river-tools" / "bin" / "python")
     ros_python: str = "/usr/bin/python3"
 
@@ -107,17 +111,15 @@ class ClusterCfg:
     is reachable, nothing else."""
     id: str = "gpu"
     label: str = "GPU machine"
-    kind: str = "direct"                # "direct" = a GPU machine (cloud VM): training runs in the background;
-                                        # "slurm" = a cluster: sbatch / squeue / scancel
     host: str = ""                      # host name or IP ...
     user: str = ""                      # ... login user ...
     port: int = 22                      # ... and SSH port
     identity_file: str = ""             # "~/.ssh/<key>" or "dashboard:<key>" (a key the dashboard generated)
     ssh_host: str = ""                  # instead of host/user/port: an alias from ~/.ssh/config
     control_path: str = ""              # "" = <state>/ssh/cm-<id>-%C
-    workdir: str = ""                   # remote folder with the training script, data/ and runs/
-    slurm_script: str = ""              # slurm only
-    python: str = "python3"             # relative to workdir or on PATH (e.g. venv/bin/python)
+    workdir: str = ""                   # remote folder: a copy of the repository (code, data/, runs/)
+    python: str = "python3"             # plain Python 3 for small status scripts (stdlib only)
+    uv: str = ""                        # uv on the machine; "" = on PATH, else ~/.local/bin/uv (Prepare installs it)
     max_submits_per_hour: int = 20
 
     @property
@@ -220,6 +222,25 @@ def clusters_file(config_path: str) -> Path:
     return Path(os.environ.get("DD_CLUSTERS") or Path(config_path).expanduser().parent / "clusters.toml")
 
 
+def _ssh_servers(entries: list) -> list:
+    """Training machines are GPU servers reached over SSH. Entries of older dashboards may carry kind /
+    slurm_script: the keys are dropped, Slurm clusters are skipped (with a log line)."""
+    out = []
+    for c in entries:
+        if not isinstance(c, dict):
+            out.append(c)
+            continue
+        c = dict(c)
+        if c.pop("kind", "direct") == "slurm":
+            import logging
+            logging.getLogger("durance.config").warning("training machine %r is a Slurm cluster: not supported, skipped",
+                                                        c.get("id"))
+            continue
+        c.pop("slurm_script", None)
+        out.append(c)
+    return out
+
+
 def load(path: str | None = None) -> Config:
     path = path or os.environ.get("DD_CONFIG") or str(HOME / ".config" / "durance-dashboard" / "config.toml")
     raw = {}
@@ -239,7 +260,7 @@ def load(path: str | None = None) -> Config:
     if "clusters" in raw:
         if not isinstance(raw["clusters"], list):
             raise ConfigError("clusters: expected an array of tables ([[clusters]])")
-        cfg.clusters = [_fill(ClusterCfg, c, f"clusters[{i}]") for i, c in enumerate(raw["clusters"])]
+        cfg.clusters = [_fill(ClusterCfg, c, f"clusters[{i}]") for i, c in enumerate(_ssh_servers(raw["clusters"]))]
         for c in cfg.clusters:
             if not c.control_path:
                 c.control_path = str(control_dir(cfg.paths.state) / f"cm-{c.id[:12]}-%C")
@@ -267,11 +288,7 @@ def validate(cfg: Config) -> None:
     if len(set(ids)) != len(ids):
         raise ConfigError("clusters: duplicate id")
     for c in cfg.clusters:
-        if c.kind not in ("slurm", "direct"):
-            raise ConfigError(f"clusters[{c.id}].kind: 'slurm' or 'direct'")
         if not ((c.ssh_host or c.host) and c.workdir):
             raise ConfigError(f"clusters[{c.id}]: host (or ssh_host) and workdir are required")
-        if c.kind == "slurm" and not c.slurm_script:
-            raise ConfigError(f"clusters[{c.id}]: slurm_script is required for a Slurm cluster")
         if not 1 <= c.port <= 65535:
             raise ConfigError(f"clusters[{c.id}].port out of range")
