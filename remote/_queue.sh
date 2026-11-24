@@ -21,6 +21,12 @@ if [[ $parallel == auto ]]; then
 fi
 say "$# configs, $parallel at a time: $*"
 
+# Build each distinct dataset cache once, before the parallel runs (they would all build it at once).
+for config in "$@"; do
+    "$HOME/.local/bin/uv" run --group train python -m training.snn prepare --config "$config" 2>&1 |
+        grep -E "cache ready|using cache|Error|error" | sed 's/^/  /' | tee -a "$log"
+done
+
 running=()
 for config in "$@"; do
     while ((${#running[@]} >= parallel)); do

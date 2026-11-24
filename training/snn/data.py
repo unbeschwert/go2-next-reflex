@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
 from collections import Counter
 from dataclasses import dataclass
@@ -84,7 +85,8 @@ def build_cache(cfg: Config, splits: dict[str, list[Clip]], workers: int = 8) ->
             print(f"  {split}: using cache {x_path}", flush=True)
             continue
         x_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = x_path.with_suffix(".partial.npy")
+        # Per process: runs started together (remote/queue.sh) may build the same cache at once.
+        tmp = x_path.with_suffix(f".partial-{os.getpid()}.npy")
         shape = (len(clips), d.time_steps, 2, d.size, d.size)
         x = np.lib.format.open_memmap(tmp, mode="w+", dtype=np.uint16, shape=shape)
         jobs = [(c.path, d.time_steps, d.time_window_us, d.downsampling) for c in clips]
@@ -95,7 +97,11 @@ def build_cache(cfg: Config, splits: dict[str, list[Clip]], workers: int = 8) ->
                     print(f"  {split}: {i + 1}/{len(jobs)} clips", flush=True)
         x.flush()
         del x
+        if x_path.exists() and y_path.exists():   # another run finished the same cache first
+            tmp.unlink()
+            print(f"  {split}: using the cache another run just finished", flush=True)
+            continue
         np.save(y_path, np.array([c.label for c in clips], dtype=np.int64))
-        tmp.rename(x_path)
+        tmp.replace(x_path)
         (x_path.parent / f"{x_path.stem}-files.txt").write_text("\n".join(c.path for c in clips) + "\n")
     return out
