@@ -176,11 +176,12 @@ model as the FPGA runs it. Val = persons 11–12, test = 13–14. **With one see
 | `sew_resnet` | 73.3 / 68.3 | **73.5 / 67.9** | −4.5 | 65.2 | 66 / 94 / 22 / 54 / 99 | no-action 201 |
 | `plain_deep` | 68.2 / 50.1 | **66.9 / 49.5** | −22.9 | 64.3 | 78 / 88 / 24 / 27 / 34 | **sit 295** |
 | `recurrent` | 71.0 / 53.7 | **72.7 / 53.0** | −19.4 | 55.4 | 48 / 98 / 40 / 50 / 30 | sit 183, lay-down 179 |
-| `branch_sum` | | (training) | | | | |
-| `plif_vgg` | | (training) | | | | |
+| **`branch_sum`** | 79.1 / 73.5 | **76.6 / 75.9** | **+3.5** | 65.0 | 42 / 92 / **58** / 82 / 99 | dance 162 |
+| `plif_vgg` | 70.8 / 50.5 | **67.4 / 49.0** | −23.4 | 65.0 | 28 / 84 / 25 / 4 / 98 | **no-action 364** |
 
-The 8-bit export costs at most 1.3 points in every run (weights clipped 0 %), and the formats came out as
-before (Q1.7, `sew_v4` Q2.6; per-layer k up to 2), so the differences are the networks', not the export's.
+The 8-bit export costs at most 3.4 points on val and 1.5 on test in every run (weights clipped 0 %), and the
+formats came out as before (Q1.7, `sew_v4` Q2.6; per-layer k up to 2, `plif_vgg` layer 0 k = 8), so the
+differences are the networks', not the export's.
 
 ### What we expected and what we see
 
@@ -190,19 +191,26 @@ before (Q1.7, `sew_v4` Q2.6; per-layer k up to 2), so the differences are the ne
 | `sew_resnet` vs `plain_deep` | the shortcuts make the deeper net trainable (SEW-ResNet ablation, our slow #19) | **confirmed, the clearest result**: +18.4 test points for the same 8 layers (67.9 vs 49.5), far beyond the seed noise |
 | `sew_resnet` vs v4 | depth helps, once trainable | **not seen**: −4.5 test (borderline). The deep nets look undertrained at 20 epochs (train 64–65 %) |
 | `recurrent` | longer memory separates gestures that differ in timing | **collapses on test only**: val 72.7 % is normal, test 53.0 %, and float is as bad (53.7 %), so it isn't the 8-bit export |
+| `branch_sum` | two receptive field sizes help with people at different scales | **the only one above v4**: +3.5 test, +1.7 val. Hello, v4's weakest class, goes to 58 % recall (v4: 25–33 %), sit drops to 42 % |
+| `plif_vgg` | gradual downsampling keeps detail, deploys like v4 | **collapses on test only**, the other way round: no-action for 364 of 555 clips, dance recall 4 % |
 
-**Reading.** Two networks have normal validation accuracy but collapse on the test people: `recurrent`
-(no-action recall 30 %, sit and lay-down predicted 362 times) and `plain_deep` (sit predicted for 295 of 555
-clips). The test people are the distribution shift: person 13 has several people in the frame, person 14 a
-large moving distractor, while the train and val people are single, clean subjects. Our hypothesis, not yet
-checked per person: networks that accumulate activity, over time (the feedback loop) or through many layers
-without shortcuts, amplify that background motion, so the output never goes quiet and drifts to one class.
-Validation people look like the training people and don't show it. That also makes val a poor guide here:
-`plain_deep` had the best single val epoch of all (75.6 %) and nearly the worst test.
+**Reading.** Three networks have normal validation accuracy (67–73 %) but collapse on the test people
+(49–53 %), each onto one class: `recurrent` (sit and lay-down predicted 362 of 555 times, no-action recall
+30 %), `plain_deep` (sit 295 times) and `plif_vgg` (no-action 364 times, i.e. mostly silent). The test people
+are the distribution shift: person 13 has several people in the frame, person 14 is small at the left edge
+with a large moving distractor, while the train and val people are single, clean subjects. So the common
+factor is brittleness under that shift, not one direction: the feedback loop and the deep plain chain may
+amplify background motion into a gesture class, while `plif_vgg` (3×3 kernels, four ×2 downsamplings, the
+largest layer-0 scale k = 8) loses the gesture and stays quiet. Not yet checked per person. Validation
+people look like the training people and don't show any of it, which makes val a poor guide: `plain_deep`
+had one of the best single val epochs (75.6 %) and nearly the worst test.
 
-**Overall, no architecture beats v4 so far,** which isn't surprising: our bottleneck is generalising from
-10 clean training people to 2 different-looking test people, and architecture alone doesn't address that,
-apart from avg-pool downsampling, still the only proven gain.
+**Overall:** one candidate, `branch_sum`, is above v4 on both val and test, but one seed and +3.5 test points
+is at the edge of the seed noise (±3–4), so it is a candidate, not a result. The clearest effect is the
+shortcut ablation (+18.4 points for `sew_resnet` over `plain_deep`). Four of six are at or below v4, which
+isn't surprising: our bottleneck is generalising from 10 clean training people to 2 different-looking test
+people, which architecture alone doesn't address. `branch_sum` is also not deployable yet: its merge is a
+multi-input node, untested on the firmware (see "Implementable is not deployable yet" above).
 
 **Confounds to keep in mind.** The deep nets (`sew_resnet`, `plain_deep`) have dropout on 6 layers instead
 of v4's 3 (fair between the two of them, not against v4); `recurrent`'s layer 1 has no BatchNorm and no
@@ -210,9 +218,13 @@ dropout (riverops' recurrent layer has neither), and its output is a sum of two 
 
 ### Next
 
-- A per-person breakdown (`scripts/eval_per_person.py`) for `recurrent` and `plain_deep`, to test the
-  distractor hypothesis.
-- A second seed for `sew_v4` and `sew_resnet`, the only ones near the baseline.
+- **Two more seeds of `branch_sum`** (43, 44), and v4 with the same seeds on the same GPU: the only
+  candidate above the baseline, and the one result that could change the default recipe.
+- If it holds: a test firmware build for its multi-input node and an FPGA-vs-simulation check, which also
+  settles the weights.txt layout question for the SEW configs.
+- A per-person breakdown (`scripts/eval_per_person.py`) for `recurrent`, `plain_deep` and `plif_vgg`, to
+  test the brittleness reading.
+- A second seed for `sew_v4` and `sew_resnet`.
 - `sew_resnet` with v4's dropout layers (removes the confound), and with more epochs.
 - Before any multi-input or recurrent model goes on the board: a test firmware build and an
   FPGA-vs-simulation check.

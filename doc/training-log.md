@@ -63,8 +63,8 @@ Val / test accuracy in %. Unless noted: batch 32, constant lr 3e-3, weight decay
 | 36 | `lit/recurrent` | 11-24 21:21 | #34 with layer 1 a **`RecurrentSpikingConv2d`** | = #35 | = #34 | Q1.7, k [2, 1, 1, 1, 2] | 71.0 / 53.7 | 72.7 / 53.0 |
 | 37 | `lit/sew_resnet` | 11-24 21:56 | 8 layers: v4 stem/head + **2 SEW blocks** (19×19, 9×9), dropout layers 1–6 | = #35 | = #34 | Q1.7, k [2, 2, 1, 1, 1, 2, 2, 2] | 73.3 / 68.3 | 73.5 / 67.9 |
 | 38 | `lit/plain_deep` | 11-24 22:05 | = #37 **without the shortcuts** | = #35 | = #34 | Q1.7, k [2, 2, 1, 1, 1, 1, 1, 2] | 68.2 / 50.1 | 66.9 / 49.5 |
-| 39 | `lit/branch_sum` | 11-24 22:47 | #34 + parallel 3×3 / 5×5 branches at 19×19, **added** | = #35 | = #34 | (training) | | |
-| 40 | `lit/plif_vgg` | 11-24 22:55 | **PLIF net** (Fang 2021): 4 × {k3 + pool 2}, 5×5 "FC" conv, k1 head | = #35 | = #34 | (training) | | |
+| 39 | **`lit/branch_sum`** | 11-24 22:47 | #34 + parallel 3×3 / 5×5 branches at 19×19, **added** | = #35 | = #34 | Q1.7, k [2, 2, 1, 2, 1, 2] | 79.1 / 73.5 | **76.6 / 75.9** |
+| 40 | `lit/plif_vgg` | 11-24 22:55 | **PLIF net** (Fang 2021): 4 × {k3 + pool 2}, 5×5 "FC" conv, k1 head | = #35 | = #34 | Q1.7, k [8, 2, 1, 1, 2, 2] | 70.8 / 50.5 | 67.4 / 49.0 |
 
 Rows 3, 10–13 and 15 re-quantize an existing float model with `remote/qat.sh`, so their float numbers are those of the run they start from.
 
@@ -189,9 +189,10 @@ The first two QAT epochs lift test above #14 (76.2, 76.6), but from epoch 3 on v
 - **Spike shortcuts make depth trainable, the clearest result**: the same 8 layers reach 67.9 % test with SEW "ADD" shortcuts (#37) and 49.5 % without (#38), +18.4 points, far beyond the seed noise. This matches the SEW-ResNet ablation and explains the slow deep net of #19.
 - **But depth doesn't beat v4**: #37 is 4.5 points below #34 (borderline). Train accuracy 64–65 % after 20 epochs: the deep nets look undertrained. They also have dropout on 6 layers instead of 3, a confound against v4 (not between #37 and #38).
 - **One shortcut in v4 is neutral** (#35: 71.4 vs 72.4 % test, val −7.5). Hello stays the weak class (33 %).
-- **The recurrent layer collapses on the test people only** (#36): val 72.7 % is normal, test 53.0 %, float as bad (53.7 %), so not the export. No-action recall 30 %, sit and lay-down predicted 362 of 555 times. #38 shows the same pattern (sit predicted 295 times). Hypothesis, to check per person: networks that accumulate activity (feedback, or many layers without shortcuts) amplify the test people's background motion (several people for 13, a distractor for 14), so the output never goes quiet. Val people look like the training people and don't show it: #38 had the best single val epoch of all (75.6 %) and nearly the worst test.
-- The 8-bit export costs ≤ 1.3 points everywhere (0 % clipped).
-- So far no architecture beats #34; avg-pool downsampling is still the only architecture change with a proven gain.
+- **Branches merged by addition are the one candidate above v4** (#39): 76.6 / **75.9 %** vs 74.9 / 72.4 %, +1.7 val, +3.5 test. Hello, v4's weakest class, goes to 58 % recall (v4: 25–33 %), sit drops to 42 %. One seed and +3.5 test is at the edge of the seed noise, so it needs seeds 43/44 (and v4 on the same seeds and GPU) before it can replace v4. Not deployable yet: the merge is a multi-input node, untested on the firmware.
+- **Three networks collapse on the test people only**, each onto one class, with normal val (67–73 %): #36 recurrent (test 53.0 %, float as bad 53.7 %, so not the export; sit and lay-down predicted 362 of 555 times, no-action recall 30 %), #38 plain deep chain (49.5 %, sit predicted 295 times) and #40 PLIF net (49.0 %, the other way round: no-action 364 times, dance recall 4 %). So it's brittleness under the test-people shift (several people for 13, a small person with a distractor for 14), in either direction: feedback and the deep plain chain may amplify background motion into a class, the PLIF net loses the gesture and stays quiet. To check per person. Val people look like the training people and don't show it: #38 had one of the best single val epochs (75.6 %) and nearly the worst test.
+- The 8-bit export costs at most 3.4 points on val and 1.5 on test (0 % clipped).
+- No change to the default recipe yet. Avg-pool downsampling is still the only architecture change with a proven gain; `branch_sum` is the next to confirm.
 
 ## Open questions and next runs
 
