@@ -3,7 +3,7 @@
 source "$(dirname "$0")/_common.sh"
 name=${1:-$(latest_run)}
 [[ -n "$name" ]] || { echo "No runs on the server yet." >&2; exit 1; }
-remote "tmux ls 2>/dev/null | grep '^snn-' || echo 'no training sessions running'
+remote "tmux ls 2>/dev/null | grep -E '^(snn|q)-' || echo 'no training sessions running'
 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader | sed 's/^/GPU: /'
 echo '--- runs/$name/train.log'"
 if [[ "${2:-}" == "-f" ]]; then

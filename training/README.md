@@ -46,7 +46,9 @@ remote/
   status.sh            sessions, GPU, log tail (-f to follow)
   fetch.sh             download a run to runs/<name>/
   stop.sh              stop a run
-  _run.sh, _common.sh  internal
+  queue.sh             several configs, N at a time, in one tmux session (auto N from GPU memory)
+  runpod.sh            create / list / stop / terminate a Runpod GPU pod as the server (RUNPOD.md)
+  _run.sh, _queue.sh, _common.sh  internal
 runs/    (git-ignored) one folder per run
 cache/   (git-ignored) preprocessed event counts, reused across runs
 ```
@@ -69,6 +71,9 @@ open runs/<run>/deploy/DEPLOY.md
 ```
 
 You need SSH key access to the server (`ssh user@host` must work without a password prompt).
+
+**No server?** Train on a Runpod GPU pod instead: `remote/runpod.sh create`, then the same scripts with
+`REMOTE_ENV=remote/runpod.env`, and `remote/queue.sh` for several configs at once ([remote/RUNPOD.md](../remote/RUNPOD.md)).
 
 **One-off changes without a new YAML file:** `check`, `prepare` and `train` take `--set section.key=value`
 (repeatable, the value is parsed as YAML), e.g. `python -m training.snn train --config ... --run-dir runs/x

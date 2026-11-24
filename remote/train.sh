@@ -7,7 +7,7 @@ config=${1:?usage: remote/train.sh training/configs/<name>.yaml [run-name]}
 name=${2:-$(basename "$config" .yaml)-$(date +%Y%m%d-%H%M%S)}
 session="snn-${name//[.:]/-}"
 echo "→ checking the config locally"
-(cd "$ROOT" && uv run python -m training.snn check --config "$config")
+(cd "$ROOT" && "${PYTHON_CMD[@]}" -m training.snn check --config "$config")
 echo "→ syncing code"
 sync_code
 remote "cd $REMOTE_DIR && mkdir -p runs/$name && tmux new-session -d -s '$session' bash remote/_run.sh train '$config' 'runs/$name'"

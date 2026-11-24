@@ -2,8 +2,15 @@
 # One-time (and after dependency changes): copy code + riverops wheel, install uv and the
 # training environment (Python 3.12, torch with CUDA, riverops) on the server, check the GPU.
 source "$(dirname "$0")/_common.sh"
-ls "$ROOT"/data/riverops-*.whl >/dev/null || { echo "Put riverops-0.2.0-py3-none-any.whl in data/ first." >&2; exit 1; }
+ls "$DATA_DIR"/riverops-*.whl >/dev/null || { echo "Put riverops-0.2.0-py3-none-any.whl in $DATA_DIR first." >&2; exit 1; }
 echo "→ syncing code to $REMOTE_HOST:$REMOTE_DIR"
+# rsync and tmux are needed on the server; a fresh Runpod image may lack them (it runs as root).
+remote 'missing=""; for c in rsync tmux; do command -v $c >/dev/null || missing="$missing $c"; done
+    if [ -n "$missing" ]; then
+        if [ "$(id -u)" = 0 ] && command -v apt-get >/dev/null; then
+            echo "  installing$missing"; apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $missing >/dev/null
+        else echo "missing on the server:$missing" >&2; exit 1; fi
+    fi'
 remote "mkdir -p $REMOTE_DIR/data $REMOTE_DIR/runs ~/.local/bin"
 sync_code
 if ! remote "test -x $UV"; then

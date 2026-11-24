@@ -25,6 +25,8 @@ cache/
 
 # Server address (see remote/remote.env.example)
 remote/remote.env
+# Runpod pod address, written by remote/runpod.sh
+remote/runpod.env*
 
 # Firmware builds from riversdk.dev (download per job, not source)
 firmware-*.tar.gz
