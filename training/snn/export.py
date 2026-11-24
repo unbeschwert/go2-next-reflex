@@ -20,7 +20,7 @@ from riverops.export import export_for_river
 
 from . import fpga
 from .config import Config
-from .model import build_model, layer_shapes
+from .model import build_model, is_chain, layer_shapes, neuron_blocks
 from .quant import Formats, saturation
 
 CAMERA_BIASES = {"bias_diff": 51, "bias_diff_off": 40, "bias_diff_on": 40, "bias_fo": 29, "bias_hpf": 0,
@@ -54,12 +54,18 @@ def export_deployment(qat_model, formats: Formats, cfg: Config, run_dir: Path, m
     (out / "model.json").write_text(export_for_river(build_model(cfg).net.eval(), example))
 
     # Integer parameters: all weights, all biases, then threshold/leak per layer.
-    layers = [layer.export_params() for layer in qat_model.net]
+    # A recurrent layer contributes its input unit, then its feedback unit (riverops has no export_params
+    # for RecurrentSpikingConv2d; this order is our assumption, untested on SPLEAT firmware).
+    layers = [block.export_params() for layer in qat_model.net for block in neuron_blocks(layer)]
+    if not is_chain(cfg):
+        print("warning: skip/sum or recurrent layers: model.json lowers (riverops), but the weights.txt "
+              "layout for such graphs is untested on the SPLEAT firmware (doc/architecture-literature.md)",
+              flush=True)
     weights = [v for p in layers for v in p["weights"]]
     biases = [v for p in layers for v in p["bias"]]
     neurons = [v for p in layers for v in (p["threshold"], p["leak"])]
     values = weights + biases + neurons
-    expected = sum(s.weights + s.out_c + 2 for s in layer_shapes(cfg))
+    expected = sum(s.weights + s.biases + 2 * s.units for s in layer_shapes(cfg))
     if len(values) != expected:
         raise RuntimeError(f"exported {len(values)} parameters, expected {expected}")
     (out / "weights.txt").write_text("\n".join(str(int(v)) for v in values))   # no trailing newline

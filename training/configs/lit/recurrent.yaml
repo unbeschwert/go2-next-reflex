@@ -1,0 +1,16 @@
+# Convolutional recurrent SNN (SCRNN, Xing et al., Front. Neurosci. 2020, event-based hand gestures; also
+# the "backward connections" of SNASNet, Kim et al. ECCV 2022): v4 with layer 1 replaced by riverops'
+# RecurrentSpikingConv2d, whose feedback conv feeds the layer's own spikes of the previous step back in.
+# Memory beyond the leak's tau ~2-4 steps, for gestures that differ in their timing. No BatchNorm inside
+# riverops' recurrent layer (its convs keep a bias), and no dropout variant.
+base: ../motion_buddy_80_v4.yaml
+name: lit_recurrent
+
+model:
+  layers:                      # 80 → 19 → 19 (recurrent) → 9 → 2 → 1
+    - {out: 16, kernel: 5, padding: 1, pool: 4}
+    - {out: 16, kernel: 3, stride: 1, padding: 1, recurrent: true}
+    - {out: 16, kernel: 5, padding: 2, pool: 2}
+    - {out: 128, kernel: 5, padding: 0, pool: 2}
+    - {out: classes, kernel: 2}
+  dropout_layers: [2, 3]

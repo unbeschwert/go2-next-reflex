@@ -1,0 +1,18 @@
+# SEW-ResNet with ADD connections (Fang et al., NeurIPS 2021, arXiv:2102.04159), scaled to our budget:
+# the v4 stem and head with two SEW basic blocks (two 3x3 conv-BN-PLIF each, identity shortcut by adding
+# spikes), one at 19x19 and one at 9x9. Block output = s_out + s_in; a downsampling layer reads it.
+# The paper's DVS Gesture ablation: ADD 97.9 % vs plain 91.7 %. Control without the shortcuts: plain_deep.yaml.
+base: ../motion_buddy_80_v4.yaml
+name: lit_sew_resnet
+
+model:
+  layers:                      # 80 → 19 (block 1) → 9 (block 2) → 2 → 1
+    - {out: 16, kernel: 5, padding: 1, pool: 4}                    # 0  stem, 19x19
+    - {out: 16, kernel: 3, padding: 1}                             # 1  block 1
+    - {out: 16, kernel: 3, padding: 1}                             # 2  block 1
+    - {out: 16, kernel: 5, padding: 2, pool: 2, inputs: [0, 2]}    # 3  reads s2 + s0, 9x9
+    - {out: 16, kernel: 3, padding: 1}                             # 4  block 2
+    - {out: 16, kernel: 3, padding: 1}                             # 5  block 2
+    - {out: 128, kernel: 5, padding: 0, pool: 2, inputs: [3, 5]}   # 6  reads s5 + s3, 2x2
+    - {out: classes, kernel: 2}                                    # 7
+  dropout_layers: [1, 2, 3, 4, 5, 6]

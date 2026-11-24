@@ -16,6 +16,7 @@ Most of this is condensed from the organisers' RIVER SDK docs at https://riversd
 | [../training/README.md](../training/README.md) | **Our training pipeline**: GPU server, configs, KV260 memory-aware quantization, export to the Kria |
 | [data-augmentation.md](data-augmentation.md) | **Data augmentation** for robustness: what each one does and why, config, ablation runs, the QAT NaN fix |
 | [architecture-options.md](architecture-options.md) | **Network architecture**: which riverops building blocks reach the FPGA, options ranked for our problem, the spatial head and avg-pool downsampling |
+| [architecture-literature.md](architecture-literature.md) | **Architectures from the literature** (PLIF net, SEW-ResNet, multi-branch, recurrent SCRNN, …) mapped onto riverops, the `inputs:` / `recurrent:` layer keys, and their results |
 | [training-log.md](training-log.md) | **Training log**: every run with its settings and results, and what we learned from it |
 | [deploy-model.md](deploy-model.md) | Putting a trained SNN on the Kria: bitstream, server config, camera config, weights file |
 | [fpga-debugging.md](fpga-debugging.md) | **Learning record**: why the FPGA and the simulation disagreed (potentials never reset), each hypothesis and its test |

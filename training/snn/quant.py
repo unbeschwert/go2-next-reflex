@@ -16,6 +16,7 @@ from riverops.nn import FixedPointFormat, QuantConfig, fuse_model
 from riverops.nn.spiking_conv import SpikingConv2d
 
 from .config import Config
+from .model import neuron_blocks
 
 
 @dataclass(frozen=True)
@@ -50,10 +51,16 @@ def folded_params(model) -> list[tuple[torch.Tensor, torch.Tensor]]:
     fused = fuse_model(model).eval()
     out = []
     for layer in fused.net:
-        if not isinstance(layer, SpikingConv2d):
-            raise TypeError(f"unexpected layer after fusion: {type(layer).__name__}")
-        bias = layer.conv.bias if layer.conv.bias is not None else torch.zeros(layer.conv.out_channels)
-        out.append((layer.conv.weight.detach().cpu(), bias.detach().cpu()))
+        params = []
+        for block in neuron_blocks(layer):   # a recurrent layer: input and feedback conv, sized together
+            if not isinstance(block, SpikingConv2d):
+                raise TypeError(f"unexpected layer after fusion: {type(block).__name__}")
+            bias = block.conv.bias if block.conv.bias is not None else torch.zeros(block.conv.out_channels)
+            params.append((block.conv.weight.detach().cpu(), bias.detach().cpu()))
+        if len(params) == 1:
+            out.append(params[0])
+        else:
+            out.append((torch.cat([w.flatten() for w, _ in params]), torch.cat([b for _, b in params])))
     return out
 
 
@@ -161,15 +168,17 @@ def apply_layer_scales(model, scales: list[int], threshold: float) -> None:
     when the layer still has BatchNorm, else (an already fused SpikingConv2d) the conv itself."""
     with torch.no_grad():
         for layer, k in zip(model.net, scales):
-            if k != 1:
-                if getattr(layer, "bn", None) is not None:
-                    layer.bn.weight /= k
-                    layer.bn.bias /= k
-                else:
-                    layer.conv.weight /= k
-                    if layer.conv.bias is not None:
-                        layer.conv.bias /= k
-            layer.lif.v_threshold = threshold / k
+            # A recurrent layer's two units share k: each one's potential scales by 1/k, spikes stay the same.
+            for block in neuron_blocks(layer):
+                if k != 1:
+                    if getattr(block, "bn", None) is not None:
+                        block.bn.weight /= k
+                        block.bn.bias /= k
+                    else:
+                        block.conv.weight /= k
+                        if block.conv.bias is not None:
+                            block.conv.bias /= k
+                block.lif.v_threshold = threshold / k
 
 
 def saturation(values: list[int], fmt: FixedPointFormat) -> float:

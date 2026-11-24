@@ -22,7 +22,7 @@ The firmware is generated from `model.json`, a `RiverModelGraph`: nodes, edges b
 
 **Headroom.** The v3 network uses 33 of the 108 BRAM36 we budget. PR #4 measured an FPGA latency of 0.15–0.74 ms per 10 ms frame, growing with spike activity. A network 2–3× larger still fits in memory and in real time.
 
-**Our pipeline assumes a chain** of layers (`nn.Sequential`) in `training/snn/model.py`, `quant.py`, `export.py` (weights.txt = all weights, all biases, then threshold and leak per layer, in layer order) and `fpga.py`. Changes that keep a chain are small. A DAG needs graph-aware versions of all four: skips, two outputs, recurrence.
+**The pipeline handles skips and recurrence since 2026-11-24**: a layer may read the sum of several earlier layers' spikes (`inputs: [i, j]`) or be a `RecurrentSpikingConv2d` (`recurrent: true`). Training, per-layer scaling, the fixed-point check, model.json and weights.txt work for them; the weights.txt layout of such graphs is untested on the firmware. Several outputs are still not supported. Literature architectures built this way and their results: [architecture-literature.md](architecture-literature.md).
 
 ## Options, ranked for our problem
 

@@ -1,0 +1,17 @@
+# The PLIF network for DVS128 Gesture (Fang et al., ICCV 2021, arXiv:2007.05785): repeated
+# {conv 3x3 - BN - PLIF - max-pool 2}, then a fully connected layer and the class layer. Scaled to our
+# budget (16/16/32/32 channels instead of 128), with max-pool → avg-pool (riverops folds conv + avg-pool
+# into one conv: k3 + pool 2 → k4 s2 on the FPGA; there is no max-pool), and the FC layers as convs whose
+# kernel covers the whole map. A chain: deployable with the existing pipeline and firmware generator.
+base: ../motion_buddy_80_v4.yaml
+name: lit_plif_vgg
+
+model:
+  layers:                      # 80 → 40 → 20 → 10 → 5 → 1 → 1
+    - {out: 16, kernel: 3, padding: 1, pool: 2}
+    - {out: 16, kernel: 3, padding: 1, pool: 2}
+    - {out: 32, kernel: 3, padding: 1, pool: 2}
+    - {out: 32, kernel: 3, padding: 1, pool: 2}
+    - {out: 128, kernel: 5}                       # "FC512" of the paper, as a 5x5 conv on the 5x5 map
+    - {out: classes, kernel: 1}
+  dropout_layers: [1, 2, 3, 4]

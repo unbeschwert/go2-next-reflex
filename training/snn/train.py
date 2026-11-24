@@ -21,7 +21,7 @@ from riverops.nn import BatchNorm2d, Conv2d, fuse_model, prepare_ptq, prepare_qa
 
 from .augment import augment as augment_counts
 from .config import Config
-from .model import build_model, has_pooling
+from .model import build_model, has_pooling, neuron_blocks
 from .quant import Formats, apply_layer_scales, choose_formats, describe_layers, layer_scales
 
 
@@ -295,7 +295,12 @@ def save_checkpoint(path: Path, model, cfg: Config, formats: Formats | None, pha
     # Thresholds are plain attributes, not in the state_dict; per-layer scaling changes them.
     torch.save({"state_dict": model.state_dict(), "config": cfg.to_dict(), "phase": phase,
                 "formats": formats.to_dict() if formats else None,
-                "thresholds": [float(layer.lif.v_threshold) for layer in model.net]}, path)
+                "thresholds": thresholds(model)}, path)
+
+
+def thresholds(model) -> list[float]:
+    """Per conv + neuron unit in layer order (a recurrent layer has two)."""
+    return [float(block.lif.v_threshold) for layer in model.net for block in neuron_blocks(layer)]
 
 
 def deployable(model, cfg: Config):
@@ -311,8 +316,9 @@ def load_qat_model(path: Path, cfg: Config):
     formats = Formats(**checkpoint["formats"])
     model = prepare_qat(deployable(build_model(cfg).eval(), cfg), formats.riverops(), fused_bn=True)
     model.load_state_dict(checkpoint["state_dict"])
-    for layer, threshold in zip(model.net, checkpoint.get("thresholds") or []):
-        layer.lif.v_threshold = threshold
+    blocks = [block for layer in model.net for block in neuron_blocks(layer)]
+    for block, threshold in zip(blocks, checkpoint.get("thresholds") or []):
+        block.lif.v_threshold = threshold
     return model.eval(), formats
 
 
@@ -414,7 +420,7 @@ def quantize(model, cfg: Config, splits: dict, run_dir: Path, history: list) -> 
         "formats": formats.to_dict() | {"description": formats.describe()},
         "format_choice": format_info,
         "layer_scales": scale_info,
-        "thresholds": [float(layer.lif.v_threshold) for layer in qat.net],
+        "thresholds": thresholds(qat),
         "dead_batchnorm_channels": zeroed,
         "float": {"val_acc": float_val["acc"], "test_acc": float_test["acc"]},
         "qat": {"val_acc": qat_val["acc"], "test_acc": qat_test["acc"]},

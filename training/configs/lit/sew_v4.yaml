@@ -1,0 +1,14 @@
+# SEW-ResNet "ADD" shortcut (Fang et al., NeurIPS 2021, arXiv:2102.04159) on the default v4 network:
+# one identity shortcut around layer 1, so layer 2 sees the spikes of layer 0 + layer 1. riverops lowers
+# conv(a + b) to one ConvLIF2d with two incoming edges. Smallest change to the deployed model: same layers,
+# same weights count, one extra edge. Everything else as motion_buddy_80_v4.
+base: ../motion_buddy_80_v4.yaml
+name: lit_sew_v4
+
+model:
+  layers:                      # 80 → 19 → 19 → 9 → 2 → 1
+    - {out: 16, kernel: 5, padding: 1, pool: 4}
+    - {out: 16, kernel: 3, stride: 1, padding: 1}
+    - {out: 16, kernel: 5, padding: 2, pool: 2, inputs: [0, 1]}   # SEW block output: s1 + s0
+    - {out: 128, kernel: 5, padding: 0, pool: 2}
+    - {out: classes, kernel: 2}

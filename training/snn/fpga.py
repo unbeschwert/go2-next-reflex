@@ -87,7 +87,7 @@ def layer_memories(shapes: list[LayerShape], weight_bits: int, potential_bits: i
         address_bits = max(1, math.ceil(math.log2(s.in_c * s.in_h * s.in_w)))
         memories += [
             Memory(s.index, "weights", s.weights, weight_bits),
-            Memory(s.index, "biases", s.out_c, weight_bits),
+            Memory(s.index, "biases", s.biases, weight_bits),
             Memory(s.index, "potentials", s.neurons, potential_bits),
             Memory(s.index, "event_fifo", fifo_depth, address_bits),
         ]

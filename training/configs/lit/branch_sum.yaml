@@ -1,0 +1,16 @@
+# Multi-branch cell merged by addition, as in Inception-style and NAS-found SNN cells (AutoSNN, Na et al.
+# ICML 2022; SNASNet, Kim et al. ECCV 2022): at 19x19, a 3x3 and a 5x5 branch both read layer 0, and the
+# downsampling layer reads the sum of their spikes. Concatenation would be the usual merge, but riverops
+# can't export torch.cat, so the branches add. Everything else as motion_buddy_80_v4.
+base: ../motion_buddy_80_v4.yaml
+name: lit_branch_sum
+
+model:
+  layers:                      # 80 → 19 → (3x3 | 5x5) → 9 → 2 → 1
+    - {out: 16, kernel: 5, padding: 1, pool: 4}                    # 0
+    - {out: 16, kernel: 3, padding: 1}                             # 1  3x3 branch
+    - {out: 16, kernel: 5, padding: 2, inputs: [0]}                # 2  5x5 branch, also from layer 0
+    - {out: 16, kernel: 5, padding: 2, pool: 2, inputs: [1, 2]}    # 3  sum of both branches
+    - {out: 128, kernel: 5, padding: 0, pool: 2}
+    - {out: classes, kernel: 2}
+  dropout_layers: [1, 2, 3, 4]

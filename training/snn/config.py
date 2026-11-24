@@ -174,6 +174,15 @@ class LayerConfig:
     # sees one conv of kernel `kernel + pool - 1` and stride `pool`. Needs stride 1 (riverops' fusion
     # is only exact then). 1 = no pooling.
     pool: int = 1
+    # Where this layer's input comes from: indices of earlier layers and/or "input" (the event frames).
+    # Several sources are summed spike by spike (SEW-ResNet "ADD" residuals, branches merged by addition);
+    # riverops exports conv(a + b) as one ConvLIF2d with several incoming edges, so all sources must have
+    # the same channels x H x W. None = the previous layer (a chain, as before). doc/architecture-literature.md
+    inputs: list[int | str] | None = None
+    # riverops RecurrentSpikingConv2d: an input conv plus a feedback conv from the layer's own spikes of the
+    # previous step (exported as RecurrentConvLIF2d). No BatchNorm and no pooling inside; the feedback conv
+    # runs at stride 1 with this padding, so the kernel must be 2 * padding + 1.
+    recurrent: bool = False
 
 
 @dataclass
@@ -339,6 +348,18 @@ def validate(cfg: Config) -> None:
                 raise ConfigError(f"person folders {sorted(splits[a] & splits[b])} are in both {a} and {b}")
     if not cfg.model.layers:
         raise ConfigError("model.layers is empty")
+    for i, layer in enumerate(cfg.model.layers):
+        if layer.inputs is not None and (not isinstance(layer.inputs, list) or not layer.inputs or any(
+                not (s == "input" or (isinstance(s, int) and not isinstance(s, bool) and 0 <= s < i))
+                for s in layer.inputs) or len(set(layer.inputs)) != len(layer.inputs)):
+            raise ConfigError(f"model.layers[{i}].inputs must be a non-empty list of distinct earlier layer "
+                              f"indices (0..{i - 1}) and/or 'input', got {layer.inputs!r}")
+        if layer.recurrent and (layer.pool != 1 or layer.kernel != 2 * layer.padding + 1):
+            raise ConfigError(f"model.layers[{i}]: a recurrent layer needs pool 1 and kernel = 2 * padding + 1 "
+                              "(its feedback conv must keep the layer's output size)")
+        if layer.recurrent and i in cfg.model.dropout_layers:
+            raise ConfigError(f"model.layers[{i}]: riverops' recurrent layer has no dropout variant; "
+                              "remove it from model.dropout_layers")
     for name, bits, ib in (("weight", q.weight_bits, q.weight_int_bits),
                            ("potential", q.potential_bits, q.potential_int_bits)):
         if not 2 <= bits <= 32:
