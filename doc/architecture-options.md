@@ -13,7 +13,7 @@ The firmware is generated from `model.json`, a `RiverModelGraph`: nodes, edges b
 | Adding spikes, `conv(a + b)` (skip / residual connections) | ✓ two incoming edges into one `ConvLIF2d` | ✗ | shapes must match; a sum of spikes can be 2 |
 | Several outputs (e.g. two heads) | ✓ `outputs: [a, b]` | ✗ | riverops' own README: multiple outputs "can lead to unpredictable behaviour" |
 | `NearestUpsample` → conv | ✓ `ConvLIF2d` with `upscaling: 2` (one level only) | ✗ | decoder-style; little use for classification |
-| `RecurrentSpikingConv2d`: input conv + feedback conv | ✓ `RecurrentConvLIF2d` | ✗ | no BatchNorm inside, no `export_params`, so the weights.txt layout is unknown |
+| `RecurrentSpikingConv2d`: input conv + feedback conv | ✓ `RecurrentConvLIF2d` | ✗ | no BatchNorm inside, no `export_params`, so the weights.txt layout is unknown ([below](#layers-without-export_params)) |
 | `torch.cat`, chunk, slicing | ✗ "not implemented in hardware" | – | branches can only merge by addition |
 | Global average pooling (`ReduceMean`), Linear layers | ✗ | – | a conv whose kernel covers the whole map is the "fully connected" layer |
 | Depthwise, grouped or dilated convs; non-square kernels | ✗ | – | riverops' `Conv2d` forces groups = 1, dilation = 1 |
@@ -72,6 +72,26 @@ Comparison on the 80×80 s4 network with the 20-epoch recipe of `configs/optim/a
 | both | 65.1 | 57.2 | 68.8 | 4.7 |
 
 **Avg-pool downsampling is the first change whose gain beats the seed noise.** Both seeds beat both baseline seeds, it's much more stable across seeds, and it costs nothing on the FPGA. The spatial head doesn't help here, and with pooling it makes things worse. Avg-pool on 80×80 is now the default recipe, `training/configs/motion_buddy_80_v4.yaml`. Still open: pooling at 40 epochs and on the 40×40 v3 network.
+
+## Layers without export_params
+
+The RTL exists only for the node types in `model.json` (`ConvLIF2d`, `ConvLIF2d` with `upscaling`, `RecurrentConvLIF2d`), on the server that runs Vivado. We can't add hardware layers, so a network may only use riverops layers that lower to those nodes. `weights.txt` is built from `export_params()`, and only **`SpikingConv2d`** and **`SpikingConvBN2d`** have it (`SpikingConvBN2d.export_params` is `fuse().export_params()`). Every other layer has to be rewritten as a chain of those two before export. Each claim below is checked numerically by `scripts/check_layer_replacements.py` (spikes compared exactly, `model.json` exported):
+
+| Layer | Rewrite | Exact? |
+|---|---|---|
+| `SpikingConvBNDropout2d` | Same `state_dict` as `SpikingConvBN2d` (dropout has no parameters and is identity in eval), so load it into a `SpikingConvBN2d`. That's what our pipeline does: `build_model(dropout=False)`. `.fuse()` also gives a `SpikingConv2d`. | ✓ same spikes |
+| `SpikingConvAvgPool2d`, `SpikingConvBNAvgPool2d`, `SpikingConvBNDropoutAvgPool2d` | `.fuse()` → `SpikingConv2d` with kernel `k + P − 1` and stride `P` (`fuse_model`, `deployable()` in `train.py`). | ✓ with conv stride 1. ✗ with conv stride > 1: riverops builds a `k + P − 1` kernel, but the graph says `k + s(P − 1)` (k4 vs k5 for k3 s2 + pool 2). Our config check refuses it. |
+| `IFNode` (no leak) | `SpikingConv2d(..., learnable_leak=False, initial_tau=1e12)`: `leak = 1/τ` rounds to integer 0, so the RTL's LIF update becomes IF. The blocks always build a `PLIFNode`, and the export doesn't record the neuron type, so this is the only way an IF neuron reaches the board. | ✓ same spikes (float), leak = 0 in `weights.txt` |
+| `NearestUpsample` | No parameters. Only exportable as the *sole input* of a spiking conv, which becomes `ConvLIF2d` with `upscaling` (one level). Its parameters are that conv's `export_params()`. Upsample feeding an output, an add, or another upsample fails at export. | ✓ (no rewrite needed) |
+| `AvgPool2d` on spikes, then a conv (pool *before* the conv; riverops only folds conv → pool) | One conv on the unpooled map: kernel `kron(w, ones(P, P)) / P²` (size `kP`), stride `sP`, padding `pP`. Has to be done by hand on the weights. | ✓ (to float rounding) |
+| Two convs with no neuron between (`Conv2d`, `BatchNorm2d` standalone) | Nothing exports without a neuron, but the composition is one conv: kernel `k1 + s1(k2 − 1)`, stride `s1·s2`, bias `b2 + Σw2·b1`. BN after a conv folds as usual (`fuse_conv_bn`). | ✓ if the second conv has padding 0 (its zero padding isn't the first conv's output at the border) |
+| `RecurrentSpikingConv2d` | **No chain rewrite.** Output at step t = spikes of the input path + spikes of the feedback path on the output at t − 1 (values 0–2). The feedback reads the previous time step, which no stack of per-step layers can produce, and riverops' export can't represent cycles. It is its own RTL node (`RecurrentConvLIF2d`). Its parameters exist as two `SpikingConv2d.export_params()` (input, then feedback?), but the order the RTL reads them in `weights.txt` is unknown. | – |
+
+What follows for us:
+
+- **The current pipeline is complete for chains.** Every layer type we train (`SpikingConvBN2d`, the Dropout and AvgPool variants) reaches `export_params` through `fuse()` / `deployable()`, with identical spikes.
+- **A recurrent layer needs the weights layout from the RTL side** before a recurrent model goes on the board (training one works; the export then has to assume a layout): the order of input vs feedback weights, biases and threshold/leak in `weights.txt`, and whether the feedback path has its own threshold and leak (riverops builds two neurons). BatchNorm on the input path can still be used in training (our own wrapper module) and folded into the input conv with `fuse_conv_bn` before export. The feedback conv has stride 1 and the input conv's kernel and padding, so the kernel has to be odd with `padding = (k − 1) / 2` (an even kernel fails in forward).
+- **Global average pooling before a classifier** = a conv whose kernel covers the whole map, with weights `w / (H·W)`, the fully-connected case of the pool-then-conv row.
 
 ## Before deploying any model
 
