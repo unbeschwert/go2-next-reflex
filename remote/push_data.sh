@@ -4,7 +4,7 @@
 #
 #   remote/push_data.sh [extra_folder ...]      the whole data/motion_buddy_dataset (+ extra folders)
 #   remote/push_data.sh --config <cfg.yaml>     only the clips that config's train/val/test splits use
-#                                               (5 classes of motion_buddy: ~3,700 of 6,175 files)
+#                                               (5 classes of motion_buddy: 3,733 of 6,175 files, 9.7 of 11 GB)
 #
 # On a Runpod pod with the global volume mounted, the upload is also copied to
 # /workspace-global/go2-next-reflex/data, and later pods restore it from there instead of uploading.

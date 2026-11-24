@@ -23,7 +23,7 @@ remote/runpod.sh list                          # matching GPUs and prices, creat
 remote/runpod.sh create                        # asks, creates, waits for SSH, writes remote/runpod.env
 export REMOTE_ENV=remote/runpod.env
 remote/setup.sh                                # rsync, tmux, uv, the training env, GPU check (~3 GB download)
-remote/push_data.sh --config training/configs/motion_buddy_80_v4.yaml   # only the clips it uses (~3 GB)
+remote/push_data.sh --config training/configs/motion_buddy_80_v4.yaml   # only the clips it uses (3,733 files, 9.7 GB; restored from the global volume if it's there)
 remote/queue.sh lit training/configs/lit/*.yaml                         # runs/lit/<config>/ on the pod
 remote/status.sh lit/sew_v4 -f                 # follow one run
 remote/fetch.sh lit                            # → runs/lit/ locally
@@ -38,6 +38,11 @@ When the queue ends on a pod it copies `runs/<name>` to `/workspace-global/go2-n
 waits `STOP_AFTER_MIN` (60) minutes so you can fetch, then **stops the pod** (`WHEN_DONE=stop`, the default
 on a pod; `WHEN_DONE=none` keeps it running). A stopped pod costs nothing for the GPU, but its container
 disk is wiped: what wasn't fetched is only on the global volume. Terminate it when you're done.
+
+**A CPU pod for data only** (no GPU, ~$0.06/h): `CPU_TYPE=cpu3c CPU_VCPUS=2 DISK_GB=20 remote/runpod.sh create`,
+then `remote/setup.sh --tools-only` and `remote/push_data.sh --config …`. Measured 2026-11-24: 3,733 clips
+(9.7 GB) in 16 min, ~10 MB/s upload, then copied to the global volume; a GPU pod later restores them from
+there instead of uploading.
 
 ## Storage
 
