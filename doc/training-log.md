@@ -59,6 +59,12 @@ Val / test accuracy in %. Unless noted: batch 32, constant lr 3e-3, weight decay
 | 32 | `arch-head-pool-s43` | 11-22 08:49 | both, seed 43 | = #27 | = #23 | = #14 | 72.5 / 70.8 | 71.5 / 67.4 |
 | 33 | `motion-buddy-40-v3-qat10` | 11-22 | = #14 | = #14 | = #14 | = #14 + **10 QAT epochs**, test logged per epoch | 71.5 / 76.8 | 77.4 / 71.0 |
 | 34 | **`motion-buddy-80-v4`** (default recipe) | 11-22 10:28 | = #29 (80×80, avg-pool) | = #29 | #29's set + **speed, zoom/rotation, noise, hot pixels** | = #14 (Q1.7, k [2, 1, 1, 1, 2]) | 73.9 / 72.6 | 74.9 / 72.4 |
+| 35 | `lit/sew_v4` | 11-24 21:21 | #34 + **SEW shortcut** around layer 1 (layer 2 reads s0 + s1) | = #34 (Runpod A40) | = #34 | Q2.6, k all 1 | 67.8 / 70.5 | 67.4 / 71.4 |
+| 36 | `lit/recurrent` | 11-24 21:21 | #34 with layer 1 a **`RecurrentSpikingConv2d`** | = #35 | = #34 | Q1.7, k [2, 1, 1, 1, 2] | 71.0 / 53.7 | 72.7 / 53.0 |
+| 37 | `lit/sew_resnet` | 11-24 21:56 | 8 layers: v4 stem/head + **2 SEW blocks** (19×19, 9×9), dropout layers 1–6 | = #35 | = #34 | Q1.7, k [2, 2, 1, 1, 1, 2, 2, 2] | 73.3 / 68.3 | 73.5 / 67.9 |
+| 38 | `lit/plain_deep` | 11-24 22:05 | = #37 **without the shortcuts** | = #35 | = #34 | Q1.7, k [2, 2, 1, 1, 1, 1, 1, 2] | 68.2 / 50.1 | 66.9 / 49.5 |
+| 39 | `lit/branch_sum` | 11-24 22:47 | #34 + parallel 3×3 / 5×5 branches at 19×19, **added** | = #35 | = #34 | (training) | | |
+| 40 | `lit/plif_vgg` | 11-24 22:55 | **PLIF net** (Fang 2021): 4 × {k3 + pool 2}, 5×5 "FC" conv, k1 head | = #35 | = #34 | (training) | | |
 
 Rows 3, 10–13 and 15 re-quantize an existing float model with `remote/qat.sh`, so their float numbers are those of the run they start from.
 
@@ -178,6 +184,14 @@ Applied to the deployment candidate #14 (40×40 v3, average of 10 epochs; copy `
 The first two QAT epochs lift test above #14 (76.2, 76.6), but from epoch 3 on val and test move in opposite directions: QAT fine-tunes towards the validation people, and selecting the epoch on val makes that worse (the chosen epoch is 4 points below #14 on test, mostly person 14: 66.3 → 60.6). This is why QAT kept losing on test (#11, #15, #33). If QAT is used, it should be short and not selected on val (e.g. a fixed 1–2 epochs, or the average of the QAT epochs); picking the epoch on test is not an option, as test would then no longer be an unbiased estimate.
 
 **#34: the default recipe `motion_buddy_80_v4` (80×80, avg-pool, 20 epochs) with speed, zoom/rotation, noise and hot pixels added.** Fixed point 74.9 / **72.4** %, against 68.8 / 68.6 % for the same seed without the four augmentations (#29): +3.8 test, +6.1 val, person 14 59.5 → 62.4 %. One seed, so the gain is suggestive, not proven. The first 80×80 model with an automatic, matching firmware: job **#45** (built from the config's model.json before training ended, Q1.7 / Q4.12, KV260, GenX320, less resources; the run's exported model.json is byte-identical). Board: despot downsampling 4, inputs 80×80, `scaling: 256`, 5×1×1 outputs. **Tested on the board** (20 clips, restart per clip): FPGA and fixed-point simulation agree on 19/20 predictions; signed and two's complement `weights.txt` give bit-identical outputs ([fpga-debugging.md](fpga-debugging.md#7-checks-on-the-8080-avg-pool-model-2026-11-22)).
+
+**#35–#40: architectures from the literature, built only from riverops primitives** ([architecture-literature.md](architecture-literature.md)). Each changes only the network of the default recipe #34 (same data, augmentation, schedule, seed 42, 8-bit export). Trained 2026-11-24 on a Runpod A40 (48 GB, 2 runs at a time, ~100–145 s per epoch, ~3 h for all six, ~$1.80; [remote/RUNPOD.md](../remote/RUNPOD.md)). One seed each.
+- **Spike shortcuts make depth trainable, the clearest result**: the same 8 layers reach 67.9 % test with SEW "ADD" shortcuts (#37) and 49.5 % without (#38), +18.4 points, far beyond the seed noise. This matches the SEW-ResNet ablation and explains the slow deep net of #19.
+- **But depth doesn't beat v4**: #37 is 4.5 points below #34 (borderline). Train accuracy 64–65 % after 20 epochs: the deep nets look undertrained. They also have dropout on 6 layers instead of 3, a confound against v4 (not between #37 and #38).
+- **One shortcut in v4 is neutral** (#35: 71.4 vs 72.4 % test, val −7.5). Hello stays the weak class (33 %).
+- **The recurrent layer collapses on the test people only** (#36): val 72.7 % is normal, test 53.0 %, float as bad (53.7 %), so not the export. No-action recall 30 %, sit and lay-down predicted 362 of 555 times. #38 shows the same pattern (sit predicted 295 times). Hypothesis, to check per person: networks that accumulate activity (feedback, or many layers without shortcuts) amplify the test people's background motion (several people for 13, a distractor for 14), so the output never goes quiet. Val people look like the training people and don't show it: #38 had the best single val epoch of all (75.6 %) and nearly the worst test.
+- The 8-bit export costs ≤ 1.3 points everywhere (0 % clipped).
+- So far no architecture beats #34; avg-pool downsampling is still the only architecture change with a proven gain.
 
 ## Open questions and next runs
 

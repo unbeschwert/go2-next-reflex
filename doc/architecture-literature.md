@@ -88,10 +88,40 @@ max-pool, linear layers, global pooling, soft reset (not recorded; the firmware 
 
 ### Limits of the comparison
 
-One seed per architecture, 20 epochs, trained on CPU because the GPU server was unreachable, and no tuning
-per architecture: the literature nets were tuned on DVS Gesture, often with more epochs. A result within
-±3–4 test points of the baseline is not a difference. Anything that looks better needs a second seed
-before it replaces v4.
+One seed per architecture, 20 epochs, and no tuning per architecture: the literature nets were tuned on DVS
+Gesture, often with more epochs. A result within ±3–4 test points of the baseline is not a difference.
+Anything that looks better needs a second seed before it replaces v4.
+
+## Built only from riverops primitives
+
+Every layer of every config is a riverops class, and every config goes through riverops' own exporter
+(`export_for_river`) to a `model.json` (checked for all seven, v4 included):
+
+| Config | riverops classes |
+|---|---|
+| `sew_v4`, `sew_resnet`, `plain_deep`, `branch_sum` | `SpikingConvBN2d`, `SpikingConvBNAvgPool2d` (their Dropout variants in float training only), a `PLIFNode` in each |
+| `recurrent` | the same, plus `RecurrentSpikingConv2d` for layer 1 |
+| `plif_vgg` | `SpikingConvBNAvgPool2d`, `SpikingConvBN2d` |
+
+The only code that isn't a riverops class is glue: the shortcuts and branch merges are a PyTorch `a + b` on
+spike tensors, which riverops' exporter supports explicitly (it imports the `aten.add` and folds it into a
+node with several incoming edges, `collapse_add`), and `LayerGraph` in `training/snn/model.py` only runs the
+layers in order and sums their inputs.
+
+**They are riverops versions of the published networks, not copies.** To fit the library:
+
+| Published | Here | Why |
+|---|---|---|
+| max-pool (PLIF net, SLAYER) | avg-pool folded into the conv | riverops has no max-pool; avg-pool is our one proven gain anyway |
+| fully connected layers | a conv whose kernel covers the whole map | no linear layers |
+| branches concatenated (Inception, NAS cells) | branches added | `torch.cat` isn't exportable |
+| 128 channels per layer (PLIF net) | 16 / 32 | our weight budget (~90 k, the size of v4) |
+| shortcut added to the current or membrane (Spiking ResNet, MS-ResNet) | not built | the neuron is fused inside the conv op |
+| IF neurons (some papers) | PLIF | the conv blocks always build a `PLIFNode` (an exact IF replacement exists, see the first table) |
+
+**Implementable is not deployable yet.** The chains (`plif_vgg`, `plain_deep`) deploy exactly like v4. The
+graphs with multi-input or recurrent nodes pass riverops, but no firmware with such nodes has been built or
+run on our board, and their `weights.txt` layout is an assumption ([Board status](#how-the-configs-use-it)).
 
 ## How the configs use it
 
@@ -133,9 +163,56 @@ warning for them. A test firmware build (`scripts/firmware_job.py`) and an FPGA-
 ## Results
 
 Default recipe (`motion_buddy_80_v4`: 80×80, 20 epochs, cosine lr, average of the last 5 epochs, full
-augmentation, 8-bit per-layer export, no QAT), seed 42, only the network differs. These runs were trained
-**on CPU** (the GPU server was unreachable); the baseline is run #34 from the GPU. Fixed point = the 8-bit
+augmentation, 8-bit per-layer export, no QAT), seed 42, only the network differs. Trained 2026-11-24 on a
+Runpod **NVIDIA A40** (48 GB, 2 runs at a time, ~100–145 s per epoch; [remote/RUNPOD.md](../remote/RUNPOD.md)),
+queue `runs/lit/`; the baseline is run #34 (same config and seed, the team's A100). Fixed point = the 8-bit
 model as the FPGA runs it. Val = persons 11–12, test = 13–14. **With one seed, ±3–4 test points is noise**
 ([training-log.md](training-log.md) #23/#24).
 
-RESULTS_TABLE
+| Config | Float val / test | **Fixed point val / test** | Test vs v4 | Train acc (last epoch) | Test recall: sit / lay-down / hello / dance / no-action | Most predicted |
+|---|---|---|---|---|---|---|
+| v4 (#34, baseline) | 73.9 / 72.6 | **74.9 / 72.4** | – | – | (hello P14 25 %, dance P14 50 %) | – |
+| `sew_v4` | 67.8 / 70.5 | **67.4 / 71.4** | −1.0 | 60.8 | 68 / 90 / 33 / 71 / 91 | no-action 173 of 555 |
+| `sew_resnet` | 73.3 / 68.3 | **73.5 / 67.9** | −4.5 | 65.2 | 66 / 94 / 22 / 54 / 99 | no-action 201 |
+| `plain_deep` | 68.2 / 50.1 | **66.9 / 49.5** | −22.9 | 64.3 | 78 / 88 / 24 / 27 / 34 | **sit 295** |
+| `recurrent` | 71.0 / 53.7 | **72.7 / 53.0** | −19.4 | 55.4 | 48 / 98 / 40 / 50 / 30 | sit 183, lay-down 179 |
+| `branch_sum` | | (training) | | | | |
+| `plif_vgg` | | (training) | | | | |
+
+The 8-bit export costs at most 1.3 points in every run (weights clipped 0 %), and the formats came out as
+before (Q1.7, `sew_v4` Q2.6; per-layer k up to 2), so the differences are the networks', not the export's.
+
+### What we expected and what we see
+
+| Config | Expected | Seen |
+|---|---|---|
+| `sew_v4` | a small gain, mostly for small, off-centre person 14 (layer 0's fine detail skips layer 1) | **neutral**: −1.0 test, within noise; val −7.5. Hello stays the weak class (33 %) |
+| `sew_resnet` vs `plain_deep` | the shortcuts make the deeper net trainable (SEW-ResNet ablation, our slow #19) | **confirmed, the clearest result**: +18.4 test points for the same 8 layers (67.9 vs 49.5), far beyond the seed noise |
+| `sew_resnet` vs v4 | depth helps, once trainable | **not seen**: −4.5 test (borderline). The deep nets look undertrained at 20 epochs (train 64–65 %) |
+| `recurrent` | longer memory separates gestures that differ in timing | **collapses on test only**: val 72.7 % is normal, test 53.0 %, and float is as bad (53.7 %), so it isn't the 8-bit export |
+
+**Reading.** Two networks have normal validation accuracy but collapse on the test people: `recurrent`
+(no-action recall 30 %, sit and lay-down predicted 362 times) and `plain_deep` (sit predicted for 295 of 555
+clips). The test people are the distribution shift: person 13 has several people in the frame, person 14 a
+large moving distractor, while the train and val people are single, clean subjects. Our hypothesis, not yet
+checked per person: networks that accumulate activity, over time (the feedback loop) or through many layers
+without shortcuts, amplify that background motion, so the output never goes quiet and drifts to one class.
+Validation people look like the training people and don't show it. That also makes val a poor guide here:
+`plain_deep` had the best single val epoch of all (75.6 %) and nearly the worst test.
+
+**Overall, no architecture beats v4 so far,** which isn't surprising: our bottleneck is generalising from
+10 clean training people to 2 different-looking test people, and architecture alone doesn't address that,
+apart from avg-pool downsampling, still the only proven gain.
+
+**Confounds to keep in mind.** The deep nets (`sew_resnet`, `plain_deep`) have dropout on 6 layers instead
+of v4's 3 (fair between the two of them, not against v4); `recurrent`'s layer 1 has no BatchNorm and no
+dropout (riverops' recurrent layer has neither), and its output is a sum of two spike populations (0–2).
+
+### Next
+
+- A per-person breakdown (`scripts/eval_per_person.py`) for `recurrent` and `plain_deep`, to test the
+  distractor hypothesis.
+- A second seed for `sew_v4` and `sew_resnet`, the only ones near the baseline.
+- `sew_resnet` with v4's dropout layers (removes the confound), and with more epochs.
+- Before any multi-input or recurrent model goes on the board: a test firmware build and an
+  FPGA-vs-simulation check.
