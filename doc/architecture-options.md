@@ -90,7 +90,7 @@ The RTL exists only for the node types in `model.json` (`ConvLIF2d`, `ConvLIF2d`
 What follows for us:
 
 - **The current pipeline is complete for chains.** Every layer type we train (`SpikingConvBN2d`, the Dropout and AvgPool variants) reaches `export_params` through `fuse()` / `deployable()`, with identical spikes.
-- **A recurrent layer needs the weights layout from the RTL side** before it is worth training: the order of input vs feedback weights, biases and threshold/leak in `weights.txt`, and whether the feedback path has its own threshold and leak (riverops builds two neurons). BatchNorm on the input path can still be used in training (our own wrapper module) and folded into the input conv with `fuse_conv_bn` before export. The feedback conv has stride 1 and the input conv's kernel and padding, so the kernel has to be odd with `padding = (k − 1) / 2` (an even kernel fails in forward).
+- **A recurrent layer needs the weights layout from the RTL side** before a recurrent model goes on the board (training one works; the export then has to assume a layout): the order of input vs feedback weights, biases and threshold/leak in `weights.txt`, and whether the feedback path has its own threshold and leak (riverops builds two neurons). BatchNorm on the input path can still be used in training (our own wrapper module) and folded into the input conv with `fuse_conv_bn` before export. The feedback conv has stride 1 and the input conv's kernel and padding, so the kernel has to be odd with `padding = (k − 1) / 2` (an even kernel fails in forward).
 - **Global average pooling before a classifier** = a conv whose kernel covers the whole map, with weights `w / (H·W)`, the fully-connected case of the pool-then-conv row.
 
 ## Before deploying any model
