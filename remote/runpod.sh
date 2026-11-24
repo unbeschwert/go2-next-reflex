@@ -124,14 +124,30 @@ if [[ ${NO_GLOBAL_VOLUME:-0} != 1 ]]; then
     [[ -n $vol_id ]] || die "set RUNPOD_GLOBAL_VOLUME to one of: $(jq -r '[.globalVolumes[] | "\(.id) \(.name)"] | join(", ")' <<<"$BODY") (or NO_GLOBAL_VOLUME=1)"
     vol_name="$(jq -r --arg id "$vol_id" '.globalVolumes[] | select(.id == $id) | .name' <<<"$BODY")"
 fi
+# The pod only accepts the account's registered keys (copied in at start), so one of ours must be there.
 api GET /account/ssh-keys
-[[ $STATUS != 200 ]] || jq -e '(.keys // []) | length > 0' <<<"$BODY" >/dev/null ||
-    echo "warning: no SSH public key registered (Runpod → Settings → SSH keys); SSH into the pod will fail" >&2
+if [[ $STATUS == 200 ]]; then
+    registered="$(jq -r 'paths(type == "string") as $p | getpath($p) | select(startswith("ssh-") or startswith("ecdsa-"))' <<<"$BODY" |
+        while read -r line; do ssh-keygen -lf - <<<"$line" 2>/dev/null | awk '{print $2}'; done)"
+    ours="$(for f in "$HOME"/.ssh/*.pub; do [[ -f $f ]] && ssh-keygen -lf "$f" | awk '{print $2}'; done)"
+    if ! grep -qxFf <(printf '%s\n' "$ours") <<<"$registered"; then
+        echo "warning: none of this computer's SSH keys (~/.ssh/*.pub) is registered in Runpod → Settings →" \
+            "SSH public keys; SSH into the pod will fail. Add e.g. ~/.ssh/id_ed25519.pub there first." >&2
+        [[ $command == list ]] || ((yes)) || { read -r -p "Create anyway? [y/N] " answer; [[ $answer == [yY]* ]] || die "cancelled"; }
+        [[ $command == list ]] || ! ((yes)) || die "refusing to create a pod nobody can SSH into (register the key first)"
+    fi
+fi
 
 # Stock per datacenter (does not distinguish Secure from Community: a GPU without Secure capacity fails
 # at creation and the next one is tried), then the GPU types on $CLOUD with enough VRAM.
 api GET "/catalog/datacenters?regions=$REGION&include=GPU_AVAILABILITY"
 expect 200 "listing datacenters"
+if [[ -n ${CPU_TYPE:-} ]]; then
+    # A CPU pod (e.g. CPU_TYPE=cpu3c CPU_VCPUS=2, ~$0.06/h): data transfers and API tests, no GPU.
+    dcs="$(jq -c '[.dataCenters[].id]' <<<"$BODY")"
+    candidates="$(jq -nc --arg id "$CPU_TYPE" --argjson dcs "$dcs" '[{id: $id, memory: 0, price: null, dcs: $dcs}]')"
+fi
+if [[ -z ${CPU_TYPE:-} ]]; then
 stock="$(jq -c '
     reduce (.dataCenters[] | .id as $dc | .gpuAvailability[]? | select(.availability != "NONE")
             | {gpu: .id, dc: $dc}) as $s ({}; .[$s.gpu] += [$s.dc])' <<<"$BODY")"
@@ -149,22 +165,29 @@ candidates="$(jq -c \
        | select(($order | length) == 0 or (.id as $g | any($order[]; . == $g)))]
     | if ($order | length) > 0 then sort_by(.id as $g | $order | index($g))
       elif $sort == "vram" then sort_by(-.memory, .price) else sort_by(.price) end' <<<"$BODY")"
+fi
 count="$(jq length <<<"$candidates")"
 ((count > 0)) || die "no $CLOUD GPU with >= ${MIN_VRAM_GB} GB available in $REGION${MAX_PRICE:+ under \$$MAX_PRICE/h} (CUDA >= $MIN_CUDA)"
 
 [[ -z $vol_id ]] || echo "Global volume: $vol_name ($vol_id) → $GLOBAL_MOUNT"
-echo "$CLOUD GPUs with >= ${MIN_VRAM_GB} GB in $REGION, CUDA >= $MIN_CUDA (tried in this order):"
-jq -r '.[] | [.id, (.memory | tostring) + " GB", "$" + (.price * 100 | round / 100 | tostring) + "/h", (.dcs | join(","))] | @tsv' \
-    <<<"$candidates" | awk -F'\t' '{printf "  %-40s %7s %9s  %s\n", $1, $2, $3, $4}'
+if [[ -n ${CPU_TYPE:-} ]]; then
+    echo "$CLOUD CPU pod $CPU_TYPE (${CPU_VCPUS:-2} vCPU) in $REGION: $(jq -r '.[0].dcs | join(",")' <<<"$candidates")"
+else
+    echo "$CLOUD GPUs with >= ${MIN_VRAM_GB} GB in $REGION, CUDA >= $MIN_CUDA (tried in this order):"
+    jq -r '.[] | [.id, (.memory | tostring) + " GB", "$" + (.price * 100 | round / 100 | tostring) + "/h", (.dcs | join(","))] | @tsv' \
+        <<<"$candidates" | awk -F'\t' '{printf "  %-40s %7s %9s  %s\n", $1, $2, $3, $4}'
+fi
 [[ $command != list ]] || exit 0
 
 body_for() { # body_for INDEX
     jq -c --argjson i "$1" --arg name "$POD_NAME" --arg image "$IMAGE" --arg cloud "$CLOUD" \
-        --arg cuda "$MIN_CUDA" --argjson disk "$DISK_GB" --arg vol "$vol_id" --arg mount "$GLOBAL_MOUNT" '
+        --arg cuda "$MIN_CUDA" --argjson disk "$DISK_GB" --arg vol "$vol_id" --arg mount "$GLOBAL_MOUNT" \
+        --arg cpu "${CPU_TYPE:-}" --argjson vcpus "${CPU_VCPUS:-2}" '
         .[$i] as $gpu
         | {name: $name, image: $image, cloud: $cloud, dataCenterIds: $gpu.dcs,
-           gpu: {id: $gpu.id, count: 1, minCudaVersion: $cuda},
            disk: $disk, ports: ["22/tcp"], startSsh: true}
+        + (if $cpu == "" then {gpu: {id: $gpu.id, count: 1, minCudaVersion: $cuda}}
+           else {cpu: {id: $cpu, vcpuCount: $vcpus}} end)
         + (if $vol == "" then {} else {mounts: {global: [{volumeId: $vol, path: $mount}]}} end)' <<<"$candidates"
 }
 if ((!yes)); then

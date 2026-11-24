@@ -12,6 +12,8 @@ remote 'missing=""; for c in rsync tmux; do command -v $c >/dev/null || missing=
         else echo "missing on the server:$missing" >&2; exit 1; fi
     fi'
 remote "mkdir -p $REMOTE_DIR/data $REMOTE_DIR/runs ~/.local/bin"
+# --tools-only: stop here (a CPU pod that only moves data needs no training environment).
+[[ ${1:-} != --tools-only ]] || { echo "tools ready (rsync, tmux)"; exit 0; }
 sync_code
 if ! remote "test -x $UV"; then
     echo "→ copying uv to the server"
