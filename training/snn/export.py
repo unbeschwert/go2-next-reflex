@@ -59,8 +59,8 @@ def export_deployment(qat_model, formats: Formats, cfg: Config, run_dir: Path, m
     layers = [block.export_params() for layer in qat_model.net for block in neuron_blocks(layer)]
     if not is_chain(cfg):
         print("warning: skip/sum or recurrent layers: model.json lowers (riverops), but the weights.txt "
-              "layout for such graphs is untested on the SPLEAT firmware (doc/architecture-literature.md)",
-              flush=True)
+              "layout for such graphs is untested on the SPLEAT firmware (one weight set per multi-input "
+              "node; recurrent = input then feedback unit; doc/architecture-literature.md)", flush=True)
     weights = [v for p in layers for v in p["weights"]]
     biases = [v for p in layers for v in p["bias"]]
     neurons = [v for p in layers for v in (p["threshold"], p["leak"])]

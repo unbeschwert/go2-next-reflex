@@ -11,7 +11,7 @@ onto it.
 | Class | What it is | In model.json |
 |---|---|---|
 | `PLIFNode` | leaky integrate-and-fire, one learnable leak per layer (Fang et al. 2021) | per-layer threshold and leak |
-| `IFNode` | integrate-and-fire, no leak | not usable inside the conv blocks (they always build a `PLIFNode`; `learnable_leak: false` with a large τ is the closest) |
+| `IFNode` | integrate-and-fire, no leak | not usable inside the conv blocks (they always build a `PLIFNode`); exact replacement: `learnable_leak: false` with τ = 1e12 exports leak = 0 (any τ > 2¹³ rounds to 0 in Q4.12) and spikes like `IFNode`; the export doesn't record the neuron type ([architecture-options.md](architecture-options.md#layers-without-export_params)) |
 | `SpikingConv2d`, `SpikingConvBN2d`, `SpikingConvBNDropout2d` | conv → (BN) → (dropout) → PLIF | `ConvLIF2d` |
 | `SpikingConv(BN)(Dropout)AvgPool2d` | conv → (BN) → avg-pool → PLIF | `ConvLIF2d` (pool folded into the conv) |
 | `RecurrentSpikingConv2d` | input conv + feedback conv from the layer's own previous spikes, two PLIF populations, spikes summed | `RecurrentConvLIF2d` |
@@ -67,8 +67,12 @@ lowers with `export_for_river`, quantizes (per-layer scaling, fixed-point emulat
 
 **Board status.** `plif_vgg` and `plain_deep` are chains: they deploy exactly like v4. For the others,
 model.json lowers, but no firmware with multi-input or recurrent nodes has been built or run on our board,
-and the `weights.txt` order for them is our assumption (layer order; a recurrent layer as its input unit
-then its feedback unit). riverops has no `export_params` for the recurrent layer. The export prints a
+and two things about their `weights.txt` are our assumptions:
+- **Multi-input nodes** (`sew_v4`, `sew_resnet`, `branch_sum`): one weight set per node, applied to the
+  sum of the incoming spikes (that is what riverops trains and lowers, `conv(a + b)`). Nothing confirms the
+  RTL reads one weight set per node rather than one per incoming edge.
+- **Recurrent layer** (`recurrent`): layer order, with the recurrent layer as its input unit then its
+  feedback unit. riverops has no `export_params` for `RecurrentSpikingConv2d`. The export prints a
 warning for them. A test firmware build (`scripts/firmware_job.py`) and an FPGA-vs-simulation check
 ([fpga-debugging.md](fpga-debugging.md)) come before any of them goes on the robot.
 
