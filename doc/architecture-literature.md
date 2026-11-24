@@ -39,6 +39,60 @@ max-pool, linear layers, global pooling, soft reset (not recorded; the firmware 
 | Spikformer, Spike-driven Transformer (Zhou et al. 2023, Yao et al. 2023) | spiking self-attention | ✗ matmul, linear layers | – |
 | Learnable synaptic delays (Hammouamri et al., ICLR 2024), temporal / dilated convs | dilated temporal kernels | ✗ dilation, no temporal conv | – |
 
+## Why these architectures
+
+### How they were picked
+
+1. **Exportable or not tried.** A network only matters if riverops can lower it to `model.json`, because
+   that's the only way onto the FPGA. So the filter came first: every literature design was reduced to its
+   core building block and checked against what `export_to_river_model_graph` accepts (table above).
+   Anything needing concatenation, grouped/depthwise or dilated convs, max-pool, linear layers, attention,
+   or an add *inside* the neuron was dropped, however well it does on DVS Gesture.
+2. **Aimed at our known weak spots.** From [training-log.md](training-log.md): the errors are on test
+   person 14 (small, at the left edge, with a moving distractor) and person 13 (several people in the
+   frame); *sit*, *hello* and *dance* get confused, and these gestures differ partly in timing. Avg-pool
+   downsampling, which keeps fine spatial detail, gave the only gain larger than the seed noise so far
+   ([architecture-options.md](architecture-options.md#results)). So the candidates target spatial detail and
+   scale, gradient flow through more layers, and temporal memory.
+3. **One change at a time, on the default recipe.** Every config inherits `motion_buddy_80_v4.yaml` and
+   changes only `model.layers` (and which layers get dropout). Data, augmentation, schedule, seed and the
+   8-bit export are the same as run #34, so a difference is the architecture's.
+4. **About the same size.** 90–97 k weights against v4's 90 k (only `plif_vgg` is larger, 132 k, to stay
+   faithful to the paper's FC layer), so a gain can't simply be more capacity, and every one fits the
+   KV260 memory estimate with room to spare.
+5. **Cheapest to deploy first.** Where possible the change sits on the deployed v4 network itself, so a
+   winner is close to the firmware we already run.
+
+### Why each one
+
+| Config | Hypothesis it tests | Why this design |
+|---|---|---|
+| `sew_v4` | A shortcut that carries layer 0's 19×19 spikes past layer 1 helps small, off-centre people (fine detail reaches the downsampling layer unprocessed). | SEW "ADD" shortcuts are the best residual form in the SEW-ResNet DVS Gesture ablation (97.9 % vs 91.7 % plain) and add spikes, which riverops exports. Placed around layer 1 because it is v4's only stride-1 layer, the only place an identity shortcut fits without a projection. Same layers and weights as v4, one extra edge: the smallest possible step from the deployed model. |
+| `sew_resnet` | More depth helps, provided shortcuts keep it trainable. | Our earlier deeper network (#19) learnt slowly (sit at 0 % for person 14 after 10 epochs), the degradation problem residual networks address. Two SEW basic blocks (two 3×3 convs each), one per resolution (19×19 and 9×9), on the v4 stem and head. |
+| `plain_deep` | Control for `sew_resnet`. | Identical layers without the shortcuts, as the "plain net" of the SEW paper's ablation. The pair separates "deeper" from "shortcuts". |
+| `branch_sum` | Two receptive field sizes at once cope better with people at different scales (small person 14, crowded person 13). | Inception-style and NAS-found SNN cells (AutoSNN, SNASNet) run 3×3 and 5×5 branches in parallel. They usually concatenate, which riverops can't export, so the branches add, the merge riverops does support. |
+| `recurrent` | Memory longer than the leak (τ ≈ 2–4 steps, 20–40 ms) separates gestures that differ in timing. | Convolutional recurrent SNNs (SCRNN) were built for event-based hand gestures, and SNASNet found that backward connections add up to 3 %. riverops ships `RecurrentSpikingConv2d` and exports it as its own node, so it's the one temporal mechanism we can deploy (no delays, no temporal convs). Put at layer 1, where the map is still 19×19 and the stride is 1, as its feedback conv needs. |
+| `plif_vgg` | Gradual downsampling (four ×2 steps instead of v4's ×4 stem) keeps more spatial detail early. | The DVS128 Gesture network of the paper that introduced the PLIF neuron, the neuron we use. Its max-pool becomes avg-pool, which riverops folds into the conv, extending our only proven gain. A chain, so it deploys with today's pipeline and firmware generator. |
+
+### Considered and left out
+
+- **SLAYER's gesture net**: pool, then conv, which is what v4's k5 + pool 4 stem already does.
+- **DECOLLE**: a chain of conv layers; what's new is its learning rule (fixed random readouts per
+  layer), not the architecture.
+- **Two heads / an ensemble in one network**: exportable as several outputs, but riverops itself warns
+  that several outputs "can lead to unpredictable behaviour".
+- **U-Net / upsampling decoders**: `NearestUpsample` exports, but decoders serve dense outputs
+  (segmentation), not classification.
+- **Spiking ResNet, MS-ResNet, DenseNet, MobileNet, Spikformer, learnable delays**: not exportable (see the
+  table above).
+
+### Limits of the comparison
+
+One seed per architecture, 20 epochs, trained on CPU because the GPU server was unreachable, and no tuning
+per architecture: the literature nets were tuned on DVS Gesture, often with more epochs. A result within
+±3–4 test points of the baseline is not a difference. Anything that looks better needs a second seed
+before it replaces v4.
+
 ## How the configs use it
 
 The pipeline (`training/snn/`) takes two optional keys per layer:
